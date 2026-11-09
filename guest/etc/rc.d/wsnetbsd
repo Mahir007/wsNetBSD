@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# PROVIDE: wsnetbsd
+# REQUIRE: mountcritlocal
+# BEFORE:  sshd
+# KEYWORD: shutdown
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="wsnetbsd"
+rcvar=$name
+start_cmd="/usr/libexec/wsnetbsd-init"
+stop_cmd="wsnetbsd_stop"
+
+# The kernel hangs syncing puffs mounts if their servers are still up at halt.
+wsnetbsd_stop()
+{
+	umount -f /mnt
+	umount -f /.host
+}
+
+load_rc_config $name
+run_rc_command "$1"

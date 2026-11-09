@@ -1,0 +1,22 @@
+--- a/hw/9pfs/9p.c
++++ b/hw/9pfs/9p.c
+@@ -2369,10 +2369,18 @@
+         if (err < 0) {
+             break;
+         }
+         err = v9fs_co_lstat(pdu, &path, &stbuf);
+         if (err < 0) {
+-            break;
++            /*
++             * 9P2000.u puts each entry's stat in the listing. An entry that
++             * cannot be stat'd, such as pagefile.sys on a Windows drive, must
++             * not fail the whole directory, so leave it out.
++             */
++            v9fs_readdir_unlock(&fidp->fs.dir);
++            v9fs_path_free(&path);
++            saved_dir_pos = qemu_dirent_off(dent);
++            continue;
+         }
+         err = stat_to_v9stat(pdu, &path, dent->d_name, &stbuf, &v9stat);
+         if (err < 0) {
+             break;

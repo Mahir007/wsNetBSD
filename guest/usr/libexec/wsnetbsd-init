@@ -1,0 +1,13 @@
+#!/bin/sh
+# Runs at boot, before sshd. vio9p0 carries state from the Alpine side and
+# vio9p1 is Alpine's /mnt, which holds the Windows drives.
+
+/usr/sbin/mount_9p -cu /dev/vio9p0 /.host || exit 1
+/usr/sbin/mount_9p -cu /dev/vio9p1 /mnt || echo "wsnetbsd: could not mount /mnt"
+
+[ -s /.host/hostname ] && hostname "$(cat /.host/hostname)"
+
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+cp /.host/authorized_keys /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys

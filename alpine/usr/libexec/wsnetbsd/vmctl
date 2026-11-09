@@ -1,0 +1,125 @@
+#!/bin/sh
+# Manages the NetBSD VM. A single root monitor, started from wsl.conf, owns the
+# VM's lifetime. Login shells only register a session file and wait for $READY.
+set -eu
+
+. /usr/libexec/wsnetbsd/common
+
+LIB=/usr/lib/wsnetbsd
+IMAGE=$STATE/root.img
+HOSTDIR=$STATE/host
+
+running() { [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; }
+
+memory_mib() {
+	total=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+	half=$((total / 2))
+	if [ "$half" -gt "$MAX_MEMORY_MIB" ]; then echo "$MAX_MEMORY_MIB"; else echo "$half"; fi
+}
+
+boot_vm() {
+	mkdir -p "$HOSTDIR"
+	[ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N '' -C wsnetbsd -f "$KEY"
+	cp "$KEY.pub" "$HOSTDIR/authorized_keys"
+	hostname > "$HOSTDIR/hostname"
+
+	: > "$RUN/console.log"
+	"$LIB/qemu-system-x86_64" -L "$LIB" \
+		-M microvm,x-option-roms=off,rtc=on,acpi=off,pic=off,accel=kvm \
+		-m "$(memory_mib)" -smp "$(nproc)" -cpu host,+invtsc \
+		-kernel "$LIB/kernel" -append "root=ld0a console=com" \
+		-global virtio-mmio.force-legacy=false \
+		-device virtio-blk-device,drive=root \
+		-drive file="$IMAGE",format=raw,if=none,id=root,cache=writeback,aio=threads,discard=unmap \
+		-device virtio-net-device,netdev=net0 \
+		-netdev user,id=net0,ipv6=off,hostfwd=tcp:127.0.0.1:"$SSH_PORT"-:22 \
+		-fsdev local,id=host,path="$HOSTDIR",security_model=none,readonly=on \
+		-device virtio-9p-device,fsdev=host,mount_tag=host \
+		-fsdev local,id=mnt,path=/mnt,security_model=none,multidevs=remap \
+		-device virtio-9p-device,fsdev=mnt,mount_tag=mnt \
+		-device virtio-rng-device \
+		-chardev socket,id=con,path="$RUN/console.sock",server=on,wait=off,logfile="$RUN/console.log" \
+		-serial chardev:con \
+		-display none -no-reboot -nodefaults \
+		-daemonize -pidfile "$RUN/qemu.pid"
+}
+
+start_vm() {
+	running || boot_vm
+	n=0
+	until ssh_guest -n root@127.0.0.1 true 2>/dev/null; do
+		n=$((n + 1))
+		[ "$n" -lt 600 ] || { echo "wsnetbsd: VM did not come up, see $RUN/console.log" >&2; return 1; }
+		sleep 0.1
+	done
+	: > "$READY"
+}
+
+stop_vm() {
+	rm -f "$READY"
+	running || return 0
+	# shutdown(8) sleeps for several seconds, which loses the race against WSL
+	# stopping the distro 15 s after the last session ends. The halt runs
+	# detached because a halted guest never closes the ssh connection.
+	ssh_guest -n root@127.0.0.1 '(sh /etc/rc.shutdown; /sbin/halt -lq) </dev/null >/dev/null 2>&1 &' >/dev/null 2>&1 || true
+	n=0
+	# microvm has no ACPI, so the guest halts but cannot power the VM off.
+	while [ "$n" -lt 120 ] && running && ! grep -q 'operating system has halted' "$RUN/console.log"; do
+		sleep 0.25
+		n=$((n + 1))
+	done
+	running && kill "$(cat "$RUN/qemu.pid")"
+	rm -f "$RUN/qemu.pid"
+}
+
+# Drops session files left by a login shell that was killed.
+prune_sessions() {
+	for s in "$RUN"/sessions/*; do
+		[ -e "$s" ] || continue
+		kill -0 "${s##*/}" 2>/dev/null || rm -f "$s"
+	done
+}
+
+has_sessions() { [ -n "$(ls -A "$RUN/sessions")" ]; }
+
+# should_stop IDLE_SECONDS: halt the guest now that no sessions are attached?
+# Called four times a second while the VM runs with no sessions. Return 0 to halt.
+should_stop() {
+	# TODO(human): decide when to halt. Until this is written the guest never
+	# halts on its own, and WSL kills it, so the next boot replays the journal.
+	return 1
+}
+
+cmd_monitor() {
+	mkdir -p "$RUN/sessions"
+	chmod 1777 "$RUN/sessions"
+	# Login shells watch for $FAILED so they report a dead monitor immediately.
+	trap '[ -f "$READY" ] || : > "$FAILED"' EXIT
+	start_vm
+	idle=0
+	while :; do
+		prune_sessions
+		if has_sessions; then
+			idle=0
+			running || start_vm
+		elif running; then
+			idle=$((idle + 1))
+			if should_stop "$((idle / 4))"; then
+				stop_vm
+				idle=0
+			fi
+		fi
+		sleep 0.25
+	done
+}
+
+case ${1:-} in
+boot)
+	mkdir -p "$RUN"
+	setsid "$0" monitor > "$RUN/monitor.log" 2>&1 < /dev/null &
+	;;
+monitor) cmd_monitor ;;
+stop) stop_vm ;;
+status) if running; then echo running; else echo stopped; exit 1; fi ;;
+*) echo "usage: vmctl boot|stop|status" >&2; exit 2 ;;
+esac

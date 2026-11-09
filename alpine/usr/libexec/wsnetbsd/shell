@@ -1,0 +1,57 @@
+#!/bin/sh
+# Login shell of WSL users in the Alpine layer. WSL runs this for `NetBSD.exe`
+# and `wsl -d NetBSD <command>`, and it hands the session to the guest.
+# `wsl -d NetBSD -e /bin/sh` bypasses it and reaches Alpine.
+
+. /usr/libexec/wsnetbsd/common
+
+command=
+has_command=0
+while [ $# -gt 0 ]; do
+	case $1 in
+	-c) has_command=1; command=${2:-}; break ;;
+	-l|-i|--login) shift ;;
+	*) break ;;
+	esac
+done
+
+# Survive Ctrl-C and a closed terminal long enough to deregister the session.
+# Unlike ignoring them, a trap leaves the signals at their default in ssh.
+trap : INT TERM HUP
+
+n=0
+until [ -d "$RUN/sessions" ]; do
+	n=$((n + 1))
+	[ "$n" -lt 400 ] || { echo "wsnetbsd: monitor did not start, see $RUN/monitor.log" >&2; exit 1; }
+	sleep 0.05
+done
+session=$RUN/sessions/$$
+: > "$session"
+
+n=0
+until [ -f "$READY" ]; do
+	n=$((n + 1))
+	if [ -f "$FAILED" ] || [ "$n" -ge 1200 ]; then
+		rm -f "$session"
+		echo "wsnetbsd: VM did not come up, see $RUN/monitor.log and $RUN/console.log" >&2
+		exit 1
+	fi
+	sleep 0.05
+done
+
+# quote STRING: render STRING as one single-quoted shell word.
+quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+
+cd_guest="cd $(quote "$PWD") 2>/dev/null || cd"
+if [ "$has_command" = 1 ]; then
+	remote="$cd_guest; $command"
+	if [ -t 0 ] && [ -t 1 ]; then tty=-tt; else tty=-T; fi
+else
+	remote="$cd_guest; exec \${SHELL:-/bin/sh} -l"
+	tty=-tt
+fi
+
+ssh_guest "$tty" "$(id -un)@127.0.0.1" "$remote"
+rc=$?
+rm -f "$session"
+exit "$rc"

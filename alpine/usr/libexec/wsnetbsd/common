@@ -1,0 +1,18 @@
+# Shared by vmctl and the login shell. Sourced, not run.
+
+RUN=/run/wsnetbsd
+READY=$RUN/ready
+FAILED=$RUN/failed
+STATE=/var/lib/wsnetbsd
+KEY=$STATE/id_ed25519
+SSH_PORT=22022
+MAX_MEMORY_MIB=8192
+
+[ -f /etc/wsnetbsd.conf ] && . /etc/wsnetbsd.conf
+
+ssh_guest() {
+	ssh -p "$SSH_PORT" -i "$KEY" -e none \
+		-o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=2 \
+		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+		"$@"
+}
