@@ -1,0 +1,4 @@
+#!/bin/sh
+# wslpath [-a] [-u|-w|-m] PATH: translates between Windows and NetBSD paths,
+# with the options of WSL's wslpath.
+exec /usr/libexec/wsnetbsd/hostcall wslpath "$@"

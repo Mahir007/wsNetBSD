@@ -2,30 +2,31 @@
 # Builds the NetBSD root disk. Linux cannot write FFS, so the official live
 # image runs as a builder VM and provisions a blank disk.
 set -eu
+# shellcheck source=common.sh
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
-command -v qemu-system-x86_64 >/dev/null || die "qemu-system-x86_64 is required"
+# The builder VM runs on the QEMU this project ships, so the build needs no
+# other QEMU.
+QEMU_BIN=$WORK/out/qemu/qemu-system-x86_64
+[ -x "$QEMU_BIN" ] || die "$QEMU_BIN is missing; run mkqemu.sh first"
 [ -w /dev/kvm ] || die "/dev/kvm is not writable"
-
-B=$NETBSD_URL/amd64/binary
-wget -q -O "$WORK/kernel.SHA512" "$B/kernel/SHA512" 2>/dev/null || { mkdir -p "$WORK"; wget -q -O "$WORK/kernel.SHA512" "$B/kernel/SHA512"; }
-wget -q -O "$WORK/sets.SHA512" "$B/sets/SHA512"
-wget -q -O "$WORK/images.SHA512" "$NETBSD_URL/images/SHA512"
+# shellcheck disable=SC2086 # word splitting is intended
+apk add --no-cache -q $QEMU_LIBS
 
 log "fetching NetBSD $NETBSD_VERSION"
-fetch "$B/kernel/netbsd-MICROVM.gz" "$DL/netbsd-MICROVM.gz" "$(sum_of "$WORK/kernel.SHA512" netbsd-MICROVM.gz)"
+fetch_netbsd amd64/binary/kernel/netbsd-MICROVM.gz "$DL/netbsd-MICROVM.gz"
 LIVE=NetBSD-$NETBSD_VERSION-amd64-live.img.gz
-fetch "$NETBSD_URL/images/$LIVE" "$DL/$LIVE" "$(sum_of "$WORK/images.SHA512" "$LIVE")"
+fetch_netbsd "images/$LIVE" "$DL/$LIVE"
 SHARE=$WORK/share
 rm -rf "$SHARE"
 mkdir -p "$SHARE/sets"
 for s in $NETBSD_SETS kern-MICROVM; do
-	fetch "$B/sets/$s.tar.xz" "$DL/sets/$s.tar.xz" "$(sum_of "$WORK/sets.SHA512" "$s.tar.xz")"
+	fetch_netbsd "amd64/binary/sets/$s.tar.xz" "$DL/sets/$s.tar.xz"
 	ln "$DL/sets/$s.tar.xz" "$SHARE/sets/$s.tar.xz"
 done
 
 [ -f "$DL/netbsd-MICROVM" ] || gunzip -k "$DL/netbsd-MICROVM.gz"
-[ -f "$DL/live.img" ] || gunzip -kc "$DL/$LIVE" > "$DL/live.img"
+[ -f "$WORK/live.img" ] || gunzip -kc "$DL/$LIVE" > "$WORK/live.img"
 
 cp "$ROOT/build/provision.sh" "$SHARE/"
 cp -R "$ROOT/guest" "$SHARE/guest"
@@ -43,13 +44,13 @@ cat "$VM/ser.out" >> "$VM/builder.log" &
 READER=$!
 
 log "booting builder VM"
-qemu-system-x86_64 \
+"$QEMU_BIN" -L "$WORK/out/qemu" \
 	-M microvm,x-option-roms=off,rtc=on,acpi=off,pic=off,accel=kvm \
 	-m 2048 -smp "$(nproc)" -cpu host,+invtsc \
 	-kernel "$DL/netbsd-MICROVM" -append "root=dk1 console=com rw" \
 	-global virtio-mmio.force-legacy=false \
 	-device virtio-blk-device,drive=live \
-	-drive file="$DL/live.img",format=raw,if=none,id=live,snapshot=on \
+	-drive file="$WORK/live.img",format=raw,if=none,id=live,snapshot=on \
 	-device virtio-blk-device,drive=target \
 	-drive file="$IMG",format=raw,if=none,id=target,cache=unsafe \
 	-fsdev local,id=share,path="$SHARE",security_model=none \

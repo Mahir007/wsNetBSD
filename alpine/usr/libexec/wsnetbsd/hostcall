@@ -1,0 +1,82 @@
+#!/bin/sh
+# Runs a request from the guest, as the same user. The guest's hostcall sends
+# "DIR REQUEST [ARG...]", each word single-quoted, over ssh. Requests:
+#   exec PROGRAM [ARG...]   run a Windows program in DIR
+#   wslpath [ARG...]        translate a path, as wslpath(1) in DIR
+#   ports [PORT...]         forward these guest TCP ports (root only)
+#   time                    print the time in seconds since the epoch
+# shellcheck source=common
+. /usr/libexec/wsnetbsd/common
+
+eval "set -- ${SSH_ORIGINAL_COMMAND:-}"
+[ $# -ge 2 ] || { echo "hostcall: no request" >&2; exit 2; }
+dir=$1
+request=$2
+shift 2
+
+# Only /mnt and a user's home, which vmctl mounts from the guest, are the same
+# directories in Alpine as in the guest. Elsewhere Windows programs start in
+# the home directory.
+enter_dir() {
+	case $dir in
+	/mnt/*) cd "$dir" 2>/dev/null && return ;;
+	/home/"$(id -un)"|/home/"$(id -un)"/*) cd "$dir" 2>/dev/null && return ;;
+	esac
+	cd "$HOME" 2>/dev/null || cd /
+}
+
+# hmp COMMAND: sends COMMAND to QEMU's monitor. The FIFO write blocks if QEMU
+# has gone, hence the timeout.
+hmp() {
+	# shellcheck disable=SC2016 # expanded by the inner sh
+	timeout 2 sh -c 'printf "%s\n" "$1" > "$2"' sh "$1" "$RUN/hmp.in"
+}
+
+case $request in
+exec)
+	[ $# -ge 1 ] || { echo "hostcall: exec needs a program" >&2; exit 2; }
+	program=$1
+	shift
+	case $program in
+	*/*) path=$program ;;
+	*)
+		path=$(tr : '\n' < "$HOSTDIR/winpath" 2>/dev/null | while read -r d; do
+			[ -f "$d/$program" ] && { printf %s "$d/$program"; break; }
+		done)
+		;;
+	esac
+	[ -n "$path" ] || { echo "$program: not found on the Windows PATH" >&2; exit 127; }
+	use_interop
+	enter_dir
+	exec "$path" "$@"
+	;;
+wslpath)
+	enter_dir
+	exec wslpath "$@"
+	;;
+ports)
+	[ "$(id -u)" = 0 ] || { echo "hostcall: ports is for root" >&2; exit 1; }
+	[ -p "$RUN/hmp.in" ] || exit 1
+	want=
+	for p; do
+		case $p in ''|*[!0-9]*) continue ;; esac
+		case " $NO_FORWARD_PORTS " in *" $p "*) continue ;; esac
+		want="$want $p"
+	done
+	have=$(cat "$RUN/ports" 2>/dev/null)
+	for p in $have; do
+		case " $want " in *" $p "*) ;; *) hmp "hostfwd_remove net0 tcp:127.0.0.1:$p" ;; esac
+	done
+	for p in $want; do
+		case " $have " in *" $p "*) ;; *) hmp "hostfwd_add net0 tcp:127.0.0.1:$p-:$p" ;; esac
+	done
+	printf '%s\n' "${want# }" > "$RUN/ports"
+	;;
+time)
+	date +%s
+	;;
+*)
+	echo "hostcall: unknown request $request" >&2
+	exit 2
+	;;
+esac

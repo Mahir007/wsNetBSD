@@ -1,0 +1,3 @@
+# Scripts source a common file next to them.
+external-sources=true
+source-path=SCRIPTDIR

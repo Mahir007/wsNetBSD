@@ -1,0 +1,17 @@
+#!/bin/sh
+# hostcall REQUEST [ARG...]: runs REQUEST in the Alpine layer as the same user,
+# in the current directory. Alpine's hostcall lists the requests.
+user=$(id -un)
+quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+
+remote=$(quote "$PWD")
+for arg; do remote="$remote $(quote "$arg")"; done
+if [ -t 0 ] && [ -t 1 ]; then tty=-tt; else tty=-T; fi
+
+# QEMU starts an sshd in Alpine for each connection to 10.0.2.100.
+# The control master saves a new connection for every call.
+exec ssh -F /dev/null -l "$user" -i "/.wsl/keys/$user" -e none \
+	-o BatchMode=yes -o LogLevel=ERROR \
+	-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	-o ControlMaster=auto -o ControlPath=/tmp/.hostcall-%i -o ControlPersist=60 \
+	"$tty" 10.0.2.100 "$remote"

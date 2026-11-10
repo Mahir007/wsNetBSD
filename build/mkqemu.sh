@@ -2,6 +2,7 @@
 # Builds a QEMU that can only run a KVM microvm with the devices this project
 # uses. Run on Alpine, so the binary links against the libraries in the rootfs.
 set -eu
+# shellcheck source=common.sh
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 apk add --no-cache -q build-base meson ninja python3 pkgconf bash perl flex bison \

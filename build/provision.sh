@@ -20,7 +20,7 @@ chroot "$T" sh -c 'cd /dev && sh MAKEDEV all'
 cd "$H/guest"
 find . -type d | while read -r d; do mkdir -p "$T/$d"; done
 find . -type f | while read -r f; do cp "$f" "$T/$f"; chmod 644 "$T/$f"; done
-chmod 555 "$T/etc/rc.d/wsnetbsd" "$T/usr/libexec/wsnetbsd-init"
+chmod 555 "$T/etc/rc.d/wsnetbsd" "$T"/usr/libexec/wsnetbsd/* "$T"/usr/local/bin/*
 cd /
 
 cat >> "$T/etc/rc.conf" <<'EOF'
@@ -43,18 +43,36 @@ update_motd=NO
 no_swap=YES
 EOF
 
+# sshd uses the first value it reads, so the stock line has to go.
+# /.wsl/bin holds links to Windows programs and goes last, as in WSL.
+sed 's|^AuthorizedKeysFile.*|AuthorizedKeysFile .ssh/authorized_keys /.wsl/keys/%u.pub|' \
+	"$T/etc/ssh/sshd_config" > "$T/etc/ssh/sshd_config.new"
+mv "$T/etc/ssh/sshd_config.new" "$T/etc/ssh/sshd_config"
 cat >> "$T/etc/ssh/sshd_config" <<'EOF'
 
-SetEnv PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin:/usr/local/sbin:/usr/local/bin
+SetEnv PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin:/usr/local/sbin:/usr/local/bin:/.wsl/bin
 EOF
+# shellcheck disable=SC2016 # expanded at login
+for f in etc/skel/.profile root/.profile; do
+	printf '\n# Windows programs\nPATH=${PATH}:/.wsl/bin\n' >> "$T/$f"
+done
+# shellcheck disable=SC2016 # expanded at login
+for f in etc/skel/.cshrc root/.cshrc; do
+	printf '\n# Windows programs\nset path = ($path /.wsl/bin)\n' >> "$T/$f"
+done
 
+# WSL kills the VM without warning when Windows shuts down. Writing dirty
+# buffers sooner narrows what that loses, to about what Linux on ext4 loses.
 cat >> "$T/etc/sysctl.conf" <<'EOF'
 
 net.inet.ip.dad_count=0
 net.inet6.ip6.dad_count=0
+vfs.sync.filedelay=5
+vfs.sync.dirdelay=4
+vfs.sync.metadelay=3
 EOF
 
-mkdir -p "$T/kern" "$T/proc" "$T/mnt" "$T/.host"
+mkdir -p "$T/kern" "$T/proc" "$T/mnt" "$T/.wsl"
 
 sync
 umount "$T"

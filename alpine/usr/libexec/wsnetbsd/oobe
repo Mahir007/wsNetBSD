@@ -1,0 +1,32 @@
+#!/bin/sh
+# First-run setup: creates the default user. The login shell runs this on
+# root's first interactive login. `wsl --install --from-file` runs it through
+# /etc/wsl-distribution.conf instead.
+# shellcheck source=common
+. /usr/libexec/wsnetbsd/common
+
+[ -e "$STATE/oobe-done" ] && exit 0
+
+trap 'session_end' EXIT
+trap : INT
+session_begin || exit 1
+
+cat <<'EOF'
+Create a default user for NetBSD. The name does not need to match your
+Windows user name. Leave it empty to keep logging in as root.
+EOF
+name=
+while :; do
+	printf 'User name: '
+	read -r name || exit 1
+	[ -n "$name" ] || break
+	/usr/libexec/wsnetbsd/adduser "$name" >/dev/null && break
+done
+
+if [ -n "$name" ]; then
+	# Setting the default user makes WSL stop the distro at once, so the
+	# monitor does it after the VM next halts with no sessions left.
+	printf '%s %s\n' "$name" "${WSL_DISTRO_NAME:-NetBSD}" > "$STATE/default-user"
+	echo "Logged in as $name. Use su or 'wsl -u root' for root."
+fi
+printf '%s\n' "$name" > "$STATE/oobe-done"

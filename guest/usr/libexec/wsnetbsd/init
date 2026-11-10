@@ -1,0 +1,7 @@
+#!/bin/sh
+# Mounts the shares from the Alpine layer and takes the host name from Windows.
+# /.wsl holds the users' keys, the host name and links to Windows programs.
+/usr/sbin/mount_9p -cu /dev/vio9p0 /.wsl || exit 1
+/usr/sbin/mount_9p -cu /dev/vio9p1 /mnt || echo "wsnetbsd: could not mount /mnt"
+[ -s /.wsl/hostname ] && hostname "$(cat /.wsl/hostname)"
+exit 0

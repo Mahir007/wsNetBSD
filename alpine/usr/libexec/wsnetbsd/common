@@ -1,18 +1,84 @@
-# Shared by vmctl and the login shell. Sourced, not run.
+# Shared by the scripts in this directory. Sourced, not run.
+# shellcheck shell=sh disable=SC2034 # settings for the scripts that source this
 
 RUN=/run/wsnetbsd
 READY=$RUN/ready
 FAILED=$RUN/failed
+SESSIONS=$RUN/sessions
 STATE=/var/lib/wsnetbsd
-KEY=$STATE/id_ed25519
-SSH_PORT=22022
-MAX_MEMORY_MIB=8192
+# Shared read-only with the guest, which mounts it at /.wsl.
+HOSTDIR=$STATE/host
+# One key pair per user. The guest's sshd and the Alpine sshd that runs
+# Windows programs for the guest both accept KEYS/USER.pub for USER.
+KEYS=$HOSTDIR/keys
+SHIM=/usr/libexec/wsnetbsd/shell
+# The port on 127.0.0.1 that QEMU forwards to the guest's sshd. vmctl picks
+# a free one at boot.
+SSH_PORT_FILE=$RUN/ssh-port
 
+# Settings /etc/wsnetbsd.conf can override.
+MAX_MEMORY_MIB=8192
+IDLE_HALT_SECONDS=5
+# Guest TCP ports never forwarded to Windows.
+NO_FORWARD_PORTS=22
+
+# shellcheck source=/dev/null
 [ -f /etc/wsnetbsd.conf ] && . /etc/wsnetbsd.conf
 
+# ssh_guest USER [SSH_OPTION...] netbsd [COMMAND]: runs COMMAND, or a login
+# shell, as USER in the guest. "netbsd" is a placeholder host name.
 ssh_guest() {
-	ssh -p "$SSH_PORT" -i "$KEY" -e none \
+	_user=$1
+	shift
+	ssh -F /dev/null -o HostName=127.0.0.1 -p "$(cat "$SSH_PORT_FILE")" \
+		-l "$_user" -i "$KEYS/$_user" -e none \
 		-o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=2 \
 		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 		"$@"
+}
+
+# quote STRING: prints STRING as one single-quoted shell word.
+quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+
+# session_begin: registers this process as a session, which keeps the VM up,
+# and waits until the guest accepts logins.
+session_begin() {
+	_n=0
+	until [ -d "$SESSIONS" ]; do
+		_n=$((_n + 1))
+		[ "$_n" -lt 400 ] || { echo "wsnetbsd: monitor did not start, see $RUN/monitor.log" >&2; return 1; }
+		sleep 0.05
+	done
+	SESSION=$SESSIONS/$$
+	# The monitor reads the Windows PATH from here to find Windows programs.
+	printf '%s\n' "$(windows_path)" > "$SESSION"
+	_n=0
+	until [ -f "$READY" ]; do
+		_n=$((_n + 1))
+		if [ -f "$FAILED" ] || [ "$_n" -ge 1200 ]; then
+			session_end
+			echo "wsnetbsd: NetBSD did not start." >&2
+			tail -n 3 "$RUN/monitor.log" 2>/dev/null | sed 's/^/  /' >&2
+			echo "See $RUN/monitor.log and $RUN/console.log in the Alpine layer." >&2
+			return 1
+		fi
+		sleep 0.05
+	done
+}
+
+session_end() { rm -f "$SESSION"; }
+
+# use_interop: points WSL_INTEROP at the newest interop socket. Windows
+# programs need one, and processes outside a WSL session have none set.
+use_interop() {
+	# shellcheck disable=SC2045 # the names are N_interop; ls sorts by age
+	for _s in $(ls -t /run/WSL/*_interop 2>/dev/null); do
+		[ -S "$_s" ] && { export WSL_INTEROP="$_s"; return 0; }
+	done
+	return 1
+}
+
+# windows_path: prints the PATH entries WSL appended from Windows.
+windows_path() {
+	printf %s "$PATH" | tr : '\n' | grep '^/mnt/[a-z]/' | paste -sd : -
 }

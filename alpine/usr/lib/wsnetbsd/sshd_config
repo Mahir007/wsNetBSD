@@ -1,0 +1,17 @@
+# Serves the guest's calls into Alpine. QEMU starts `sshd -i` with this file
+# for each guest connection to 10.0.2.100:22, so it never listens on a port.
+HostKey /var/lib/wsnetbsd/ssh_host_ed25519_key
+AuthorizedKeysFile /var/lib/wsnetbsd/host/keys/%u.pub
+ForceCommand /usr/libexec/wsnetbsd/hostcall
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+AllowAgentForwarding no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+X11Forwarding no
+PermitTunnel no
+PrintMotd no
+PrintLastLog no
+UseDNS no
+PidFile none

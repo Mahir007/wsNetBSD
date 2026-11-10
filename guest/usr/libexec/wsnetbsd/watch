@@ -1,0 +1,35 @@
+#!/bin/sh
+# Runs as root for as long as the guest is up. Forwards TCP ports that guest
+# programs listen on to Windows localhost, and resets the clock when it drifts,
+# as it does after Windows sleeps.
+hostcall=/usr/libexec/wsnetbsd/hostcall
+
+# Ports listening on all addresses or on the address QEMU forwards to.
+listening() {
+	netstat -an -f inet | awk '$1 ~ /^tcp/ && $NF == "LISTEN" {
+		port = $4; sub(/.*\./, "", port)
+		addr = $4; sub(/\.[0-9]+$/, "", addr)
+		if (addr == "*" || addr == "10.0.2.15") print port
+	}' | sort -un | xargs
+}
+
+sync_clock() {
+	host=$($hostcall time) || return
+	drift=$((host - $(date +%s)))
+	[ "${drift#-}" -gt 2 ] || return
+	date -u "$(date -u -r "$host" +%Y%m%d%H%M.%S)" >/dev/null &&
+		logger -t wsnetbsd "clock was ${drift}s off, reset from Windows"
+}
+
+ports=
+n=0
+while :; do
+	now=$(listening)
+	# shellcheck disable=SC2086 # one argument per port
+	if [ "$now" != "$ports" ] && $hostcall ports $now; then
+		ports=$now
+	fi
+	[ $((n % 30)) != 0 ] || sync_clock
+	n=$((n + 1))
+	sleep 1
+done

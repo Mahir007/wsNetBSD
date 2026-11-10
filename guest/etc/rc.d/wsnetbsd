@@ -4,19 +4,30 @@
 # REQUIRE: mountcritlocal
 # BEFORE:  sshd
 # KEYWORD: shutdown
+# shellcheck disable=SC2034,SC2154 # rc.subr reads and sets these
 
 $_rc_subr_loaded . /etc/rc.subr
 
 name="wsnetbsd"
 rcvar=$name
-start_cmd="/usr/libexec/wsnetbsd-init"
+start_cmd="wsnetbsd_start"
 stop_cmd="wsnetbsd_stop"
+pidfile="/var/run/wsnetbsd-watch.pid"
+
+wsnetbsd_start()
+{
+	/usr/libexec/wsnetbsd/init || return 1
+	/usr/libexec/wsnetbsd/watch </dev/null >/dev/null 2>&1 &
+	echo $! > "$pidfile"
+}
 
 # The kernel hangs syncing puffs mounts if their servers are still up at halt.
 wsnetbsd_stop()
 {
+	[ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null
+	rm -f "$pidfile"
 	umount -f /mnt
-	umount -f /.host
+	umount -f /.wsl
 }
 
 load_rc_config $name

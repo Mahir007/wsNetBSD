@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore: ['**.md', LICENSE]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' && !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo koalaman/shellcheck:v0.11.0 \
+            build/*.sh test/*.sh \
+            alpine/usr/libexec/wsnetbsd/* \
+            guest/etc/rc.d/wsnetbsd guest/usr/libexec/wsnetbsd/* guest/usr/local/bin/*
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # NetBSD sets, the live image, QEMU's source and the Alpine and wsldl
+      # downloads, all checked against pinned hashes.
+      - name: Restore downloads
+        uses: actions/cache/restore@v6
+        with:
+          path: work/dl
+          key: dl-${{ hashFiles('build/common.sh', 'build/netbsd-*.sha512') }}
+          restore-keys: dl-
+      - name: Restore QEMU
+        id: qemu
+        uses: actions/cache/restore@v6
+        with:
+          path: work/out/qemu
+          key: qemu-${{ hashFiles('build/common.sh', 'build/mkqemu.sh', 'build/qemu/**') }}
+      - name: Build
+        env:
+          VERSION: ${{ inputs.version }}
+          QEMU_CACHED: ${{ steps.qemu.outputs.cache-hit }}
+        run: |
+          docker run --rm --device /dev/kvm -v "$PWD:/src" -w /src \
+            -e WORK=/src/work -e VERSION -e QEMU_CACHED \
+            alpine:3.23 sh -euc '
+              apk add --no-cache -q git
+              git config --global --add safe.directory /src
+              [ "$QEMU_CACHED" = true ] || sh build/mkqemu.sh
+              sh build/mkimage.sh
+              sh build/mkdist.sh'
+          sudo chown -R "$(id -u):$(id -g)" work
+      - name: Save downloads
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: work/dl
+          key: dl-${{ hashFiles('build/common.sh', 'build/netbsd-*.sha512') }}
+      - name: Save QEMU
+        if: github.ref == 'refs/heads/main' && steps.qemu.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: work/out/qemu
+          key: qemu-${{ hashFiles('build/common.sh', 'build/mkqemu.sh', 'build/qemu/**') }}
+      - name: Summarize
+        run: |
+          {
+            echo '| Archive | Size | SHA-256 |'
+            echo '|---|---|---|'
+            for f in work/out/dist/*.zip work/out/dist/*.wsl; do
+              echo "| $(basename "$f") | $(du -h "$f" | cut -f1) | \`$(cut -d' ' -f1 "$f.sha256")\` |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: |
+            work/out/dist/*.zip
+            work/out/dist/*.wsl
+            work/out/dist/*.sha256
+          retention-days: 1
+          if-no-files-found: error
+
+  # GitHub's Windows runners cannot run WSL 2, so this boots the rootfs as a
+  # container on Linux and exercises everything that does not need Windows.
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: dist
+      - name: Smoke test
+        run: |
+          docker import dist/*.wsl wsnetbsd
+          docker run --rm --device /dev/kvm -v "$PWD/test:/test:ro" wsnetbsd /bin/sh /test/smoke.sh
+
+  check:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: dist
+      - name: Check the archive
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          $expected = if ($env:VERSION) { $env:VERSION } else { "0.0.0-dev+$($env:SHA.Substring(0, 7))" }
+          $zip = Get-ChildItem dist/*.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath unpacked
+          foreach ($f in 'NetBSD.exe', 'preset.json', 'rootfs.tar.gz') {
+            if (-not (Test-Path "unpacked/$f")) { throw "$f is missing from $($zip.Name)" }
+          }
+          $version = (tar -xzOf unpacked/rootfs.tar.gz usr/lib/wsnetbsd/version).Trim()
+          if ($version -ne $expected) { throw "rootfs says $version, expected $expected" }
+          "rootfs version $version"

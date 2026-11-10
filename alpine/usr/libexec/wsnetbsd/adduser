@@ -1,0 +1,47 @@
+#!/bin/sh
+# adduser NAME: gives NAME an account in Alpine and in NetBSD with the same
+# uid, and the key pair that connects them. Runs as root.
+# An existing NetBSD account keeps its uid. A new one joins wheel, so su works.
+set -eu
+# shellcheck source=common
+. /usr/libexec/wsnetbsd/common
+
+die() { echo "adduser: $*" >&2; exit 1; }
+
+[ $# = 1 ] || die "usage: adduser NAME"
+name=$1
+[ "$(id -u)" = 0 ] || die "must run as root"
+printf %s "$name" | grep -Eq '^[a-z_][a-z0-9_-]{0,15}$' ||
+	die "'$name' is not a valid user name: use up to 16 lowercase letters, digits, _ or -"
+[ "$name" != root ] || die "root already has an account"
+
+trap session_end EXIT
+session_begin || exit 1
+
+guest_uids=$(ssh_guest root -n netbsd 'cut -d: -f3 /etc/passwd')
+uid=$(ssh_guest root -n netbsd "id -u $name 2>/dev/null" || true)
+if [ -z "$uid" ]; then
+	uid=1000
+	while printf '%s\n' "$guest_uids" | grep -qx "$uid" || cut -d: -f3 /etc/passwd | grep -qx "$uid"; do
+		uid=$((uid + 1))
+	done
+fi
+
+if id "$name" >/dev/null 2>&1; then
+	[ "$(id -u "$name")" = "$uid" ] ||
+		die "$name has uid $(id -u "$name") in Alpine but $uid in NetBSD"
+else
+	adduser -D -h "/home/$name" -s "$SHIM" -u "$uid" "$name"
+	# OpenSSH refuses key logins to accounts locked with '!'.
+	sed -i "s/^$name:!:/$name:*:/" /etc/shadow
+fi
+
+if [ ! -f "$KEYS/$name" ]; then
+	ssh-keygen -q -t ed25519 -N '' -C "$name@wsnetbsd" -f "$KEYS/$name"
+	chown "$name" "$KEYS/$name" "$KEYS/$name.pub"
+fi
+
+# WSL can kill the VM at any moment. A user database whose new blocks were
+# never written breaks every login, so it goes to disk now.
+ssh_guest root -n netbsd "id $name >/dev/null 2>&1 || useradd -m -u $uid -G wheel -s /bin/sh $name; sync"
+echo "adduser: $name has uid $uid"

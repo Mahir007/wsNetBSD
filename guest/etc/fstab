@@ -1,6 +1,7 @@
-/dev/ld0a	/		ffs	rw,log,noatime	1 1
-ptyfs		/dev/pts	ptyfs	rw		0 0
-kernfs		/kern		kernfs	rw		0 0
-procfs		/proc		procfs	rw		0 0
-tmpfs		/tmp		tmpfs	rw,-m=1777	0 0
-tmpfs		/var/shm	tmpfs	rw,-m=1777	0 0
+# discard hands freed blocks back to the sparse disk image in WSL.
+/dev/ld0a  /         ffs     rw,log,noatime,discard  1 1
+ptyfs      /dev/pts  ptyfs   rw                      0 0
+kernfs     /kern     kernfs  rw                      0 0
+procfs     /proc     procfs  rw                      0 0
+tmpfs      /tmp      tmpfs   rw,-m=1777              0 0
+tmpfs      /var/shm  tmpfs   rw,-m=1777              0 0

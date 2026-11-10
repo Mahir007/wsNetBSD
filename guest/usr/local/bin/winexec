@@ -1,0 +1,7 @@
+#!/bin/sh
+# winexec PROGRAM [ARG...]: runs a Windows program, as WSL does for Linux.
+# PROGRAM is a name on the Windows PATH or a path under /mnt. Each .exe on the
+# Windows PATH also has a script in /.wsl/bin, which is on PATH, so
+# `notepad.exe` works as well.
+[ $# -gt 0 ] || { echo "usage: winexec PROGRAM [ARG...]" >&2; exit 2; }
+exec /usr/libexec/wsnetbsd/hostcall exec "$@"

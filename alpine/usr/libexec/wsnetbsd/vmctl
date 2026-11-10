@@ -3,11 +3,12 @@
 # VM's lifetime. Login shells only register a session file and wait for $READY.
 set -eu
 
+# shellcheck source=common
 . /usr/libexec/wsnetbsd/common
 
 LIB=/usr/lib/wsnetbsd
-IMAGE=$STATE/root.img
-HOSTDIR=$STATE/host
+IMAGE=$STATE/root.qcow2
+HOST_KEY=$STATE/ssh_host_ed25519_key
 
 running() { [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; }
 
@@ -17,37 +18,63 @@ memory_mib() {
 	if [ "$half" -gt "$MAX_MEMORY_MIB" ]; then echo "$MAX_MEMORY_MIB"; else echo "$half"; fi
 }
 
+# Prints a TCP port from 22022 up that nothing listens on. All WSL
+# distributions share one network namespace, so another NetBSD distribution
+# may hold 22022.
+free_port() {
+	port=22022
+	while awk -v p=":$(printf %04X "$port")" '
+		$4 == "0A" && substr($2, length($2) - 4) == p { found = 1 }
+		END { exit !found }' /proc/net/tcp /proc/net/tcp6 2>/dev/null; do
+		port=$((port + 1))
+	done
+	echo "$port"
+}
+
 boot_vm() {
-	mkdir -p "$HOSTDIR"
-	[ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N '' -C wsnetbsd -f "$KEY"
-	cp "$KEY.pub" "$HOSTDIR/authorized_keys"
+	if [ ! -c /dev/kvm ]; then
+		echo "wsnetbsd: /dev/kvm is missing. NetBSD needs WSL 2 with nested virtualization." >&2
+		return 1
+	fi
+	mkdir -p "$KEYS"
+	[ -f "$KEYS/root" ] || ssh-keygen -q -t ed25519 -N '' -C root@wsnetbsd -f "$KEYS/root"
+	[ -f "$HOST_KEY" ] || ssh-keygen -q -t ed25519 -N '' -f "$HOST_KEY"
 	hostname > "$HOSTDIR/hostname"
 
 	: > "$RUN/console.log"
+	rm -f "$RUN/hmp.in" "$RUN/hmp.out" "$RUN/ports"
+	mkfifo -m 600 "$RUN/hmp.in" "$RUN/hmp.out"
+	ssh_port=$(free_port)
+	echo "$ssh_port" > "$SSH_PORT_FILE"
+	# The guest reaches Alpine at 10.0.2.100:22, where QEMU starts an sshd per
+	# connection. It runs Windows programs and forwards ports for the guest.
 	"$LIB/qemu-system-x86_64" -L "$LIB" \
 		-M microvm,x-option-roms=off,rtc=on,acpi=off,pic=off,accel=kvm \
 		-m "$(memory_mib)" -smp "$(nproc)" -cpu host,+invtsc \
 		-kernel "$LIB/kernel" -append "root=ld0a console=com" \
 		-global virtio-mmio.force-legacy=false \
 		-device virtio-blk-device,drive=root \
-		-drive file="$IMAGE",format=raw,if=none,id=root,cache=writeback,aio=threads,discard=unmap \
+		-drive file="$IMAGE",format=qcow2,if=none,id=root,cache=writeback,aio=threads,discard=unmap \
 		-device virtio-net-device,netdev=net0 \
-		-netdev user,id=net0,ipv6=off,hostfwd=tcp:127.0.0.1:"$SSH_PORT"-:22 \
+		-netdev "user,id=net0,ipv6=off,hostfwd=tcp:127.0.0.1:$ssh_port-:22,guestfwd=tcp:10.0.2.100:22-cmd:/usr/sbin/sshd -i -f $LIB/sshd_config" \
 		-fsdev local,id=host,path="$HOSTDIR",security_model=none,readonly=on \
 		-device virtio-9p-device,fsdev=host,mount_tag=host \
 		-fsdev local,id=mnt,path=/mnt,security_model=none,multidevs=remap \
 		-device virtio-9p-device,fsdev=mnt,mount_tag=mnt \
 		-device virtio-rng-device \
-		-chardev socket,id=con,path="$RUN/console.sock",server=on,wait=off,logfile="$RUN/console.log" \
+		-chardev "socket,id=con,path=$RUN/console.sock,server=on,wait=off,logfile=$RUN/console.log" \
 		-serial chardev:con \
+		-chardev pipe,id=hmp,path="$RUN/hmp" -mon chardev=hmp,mode=readline \
 		-display none -no-reboot -nodefaults \
-		-daemonize -pidfile "$RUN/qemu.pid"
+		-daemonize -pidfile "$RUN/qemu.pid" 9>&-
+	# QEMU's monitor blocks once nobody reads its output.
+	cat "$RUN/hmp.out" > /dev/null 9>&- &
 }
 
 start_vm() {
 	running || boot_vm
 	n=0
-	until ssh_guest -n root@127.0.0.1 true 2>/dev/null; do
+	until ssh_guest root -n netbsd true 2>/dev/null; do
 		n=$((n + 1))
 		[ "$n" -lt 600 ] || { echo "wsnetbsd: VM did not come up, see $RUN/console.log" >&2; return 1; }
 		sleep 0.1
@@ -57,11 +84,12 @@ start_vm() {
 
 stop_vm() {
 	rm -f "$READY"
+	unmount_homes
 	running || return 0
 	# shutdown(8) sleeps for several seconds, which loses the race against WSL
 	# stopping the distro 15 s after the last session ends. The halt runs
 	# detached because a halted guest never closes the ssh connection.
-	ssh_guest -n root@127.0.0.1 '(sh /etc/rc.shutdown; /sbin/halt -lq) </dev/null >/dev/null 2>&1 &' >/dev/null 2>&1 || true
+	ssh_guest root -n netbsd '(sh /etc/rc.shutdown; /sbin/halt -lq) </dev/null >/dev/null 2>&1 &' >/dev/null 2>&1 || true
 	n=0
 	# microvm has no ACPI, so the guest halts but cannot power the VM off.
 	while [ "$n" -lt 120 ] && running && ! grep -q 'operating system has halted' "$RUN/console.log"; do
@@ -69,46 +97,124 @@ stop_vm() {
 		n=$((n + 1))
 	done
 	running && kill "$(cat "$RUN/qemu.pid")"
-	rm -f "$RUN/qemu.pid"
+	rm -f "$RUN/qemu.pid" "$RUN/ports"
+}
+
+# Mounts the NetBSD home of each user with a session over their Alpine home,
+# so Windows sees it at \\wsl.localhost\DISTRO\home\USER.
+mount_homes() {
+	for s in "$SESSIONS"/*; do
+		[ -e "$s" ] || continue
+		user=$(stat -c %U "$s")
+		home=/home/$user
+		[ "$user" != root ] && [ -f "$KEYS/$user" ] && [ -d "$home" ] || continue
+		grep -q " $home fuse.sshfs " /proc/mounts && continue
+		sshfs -F /dev/null -p "$(cat "$SSH_PORT_FILE")" \
+			-o IdentityFile="$KEYS/$user",BatchMode=yes,LogLevel=ERROR \
+			-o StrictHostKeyChecking=no,UserKnownHostsFile=/dev/null \
+			-o ServerAliveInterval=5,reconnect,allow_other,default_permissions,idmap=none \
+			"$user@127.0.0.1:$home" "$home" 9>&- ||
+			echo "wsnetbsd: could not mount the NetBSD $home" >&2
+	done
+}
+
+unmount_homes() {
+	awk '$3 == "fuse.sshfs" { print $2 }' /proc/mounts | while read -r m; do
+		fusermount3 -uz "$m" || true
+	done
 }
 
 # Drops session files left by a login shell that was killed.
 prune_sessions() {
-	for s in "$RUN"/sessions/*; do
+	for s in "$SESSIONS"/*; do
 		[ -e "$s" ] || continue
 		kill -0 "${s##*/}" 2>/dev/null || rm -f "$s"
 	done
 }
 
-has_sessions() { [ -n "$(ls -A "$RUN/sessions")" ]; }
-
 # should_stop IDLE_SECONDS: halt the guest now that no sessions are attached?
-# Called four times a second while the VM runs with no sessions. Return 0 to halt.
-should_stop() {
-	# TODO(human): decide when to halt. Until this is written the guest never
-	# halts on its own, and WSL kills it, so the next boot replays the journal.
-	return 1
+# WSL kills the distro 15 s after its last session ends, and a halt takes
+# about 3 s. Halting first saves the next boot a journal replay.
+should_stop() { [ "$1" -ge "$IDLE_HALT_SECONDS" ]; }
+
+# Makes the user oobe created the distro's default. WSL stops the distro to
+# apply it, so this runs only after an idle halt.
+apply_default_user() {
+	[ -f "$STATE/default-user" ] || return 0
+	read -r name distro < "$STATE/default-user"
+	rm -f "$STATE/default-user"
+	use_interop || true
+	/mnt/c/Windows/System32/wsl.exe --manage "$distro" --set-default-user "$name" ||
+		echo "wsnetbsd: could not make $name the default user" >&2
+}
+
+# link_windows_programs PATH: gives each .exe on the Windows PATH a script in
+# the directory the guest sees as /.wsl/bin, which runs the guest's winexec
+# with the script's name. They are hard links to one script: the guest's 9p
+# client cannot follow symlinks.
+link_windows_programs() {
+	new=$HOSTDIR/bin.new
+	rm -rf "$new"
+	mkdir "$new"
+	stub=$new/.winexec
+	# shellcheck disable=SC2016 # the stub expands these
+	printf '#!/bin/sh\nexec /usr/local/bin/winexec "${0##*/}" "$@"\n' > "$stub"
+	chmod 755 "$stub"
+	printf %s "$1" | tr : '\n' | while read -r dir; do
+		for exe in "$dir"/*.exe; do
+			[ -e "$exe" ] || continue
+			[ -e "$new/${exe##*/}" ] || ln "$stub" "$new/${exe##*/}" || true
+		done
+	done
+	printf '%s\n' "$1" > "$HOSTDIR/winpath"
+	rm -rf "${HOSTDIR:?}/bin"
+	mv "$new" "$HOSTDIR/bin"
+}
+
+# Relinks Windows programs once per distro start, to pick up new ones, and
+# again whenever a session brings a different Windows PATH.
+refresh_windows_programs() {
+	# shellcheck disable=SC2012 # session files are named by pid
+	newest=$(ls -t "$SESSIONS" | head -n 1)
+	[ -n "$newest" ] || return 0
+	path=$(head -n 1 "$SESSIONS/$newest" 2>/dev/null) || return 0
+	[ -n "$path" ] || return 0
+	[ "$path" != "$(cat "$RUN/winpath" 2>/dev/null)" ] || return 0
+	printf '%s\n' "$path" > "$RUN/winpath"
+	link_windows_programs "$path" >> "$RUN/monitor.log" 2>&1 9>&- &
 }
 
 cmd_monitor() {
-	mkdir -p "$RUN/sessions"
-	chmod 1777 "$RUN/sessions"
+	# Only one monitor may own the VM. Children close the lock's descriptor so
+	# it dies with the monitor.
+	exec 9> "$RUN/monitor.lock"
+	flock -n 9 || { echo "wsnetbsd: a monitor is already running" >&2; exit 0; }
+	mkdir -p "$SESSIONS"
+	chmod 1777 "$SESSIONS"
 	# Login shells watch for $FAILED so they report a dead monitor immediately.
 	trap '[ -f "$READY" ] || : > "$FAILED"' EXIT
 	start_vm
 	idle=0
+	seen=
 	while :; do
 		prune_sessions
-		if has_sessions; then
+		sessions=$(ls -A "$SESSIONS")
+		if [ -n "$sessions" ]; then
 			idle=0
 			running || start_vm
+			if [ "$sessions" != "$seen" ]; then
+				refresh_windows_programs
+				mount_homes
+			fi
 		elif running; then
 			idle=$((idle + 1))
 			if should_stop "$((idle / 4))"; then
 				stop_vm
 				idle=0
+				apply_default_user
 			fi
 		fi
+		seen=$sessions
 		sleep 0.25
 	done
 }
@@ -116,6 +222,8 @@ cmd_monitor() {
 case ${1:-} in
 boot)
 	mkdir -p "$RUN"
+	# Leave a running monitor and its log alone.
+	flock -n "$RUN/monitor.lock" true || exit 0
 	setsid "$0" monitor > "$RUN/monitor.log" 2>&1 < /dev/null &
 	;;
 monitor) cmd_monitor ;;

@@ -3,6 +3,7 @@
 # and `wsl -d NetBSD <command>`, and it hands the session to the guest.
 # `wsl -d NetBSD -e /bin/sh` bypasses it and reaches Alpine.
 
+# shellcheck source=common
 . /usr/libexec/wsnetbsd/common
 
 command=
@@ -15,43 +16,50 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+# sshd runs the guest's calls into Alpine through this shell too.
+if [ -n "${SSH_CONNECTION:-}" ] && [ "$command" = /usr/libexec/wsnetbsd/hostcall ]; then
+	exec /usr/libexec/wsnetbsd/hostcall
+fi
+
 # Survive Ctrl-C and a closed terminal long enough to deregister the session.
 # Unlike ignoring them, a trap leaves the signals at their default in ssh.
 trap : INT TERM HUP
 
-n=0
-until [ -d "$RUN/sessions" ]; do
-	n=$((n + 1))
-	[ "$n" -lt 400 ] || { echo "wsnetbsd: monitor did not start, see $RUN/monitor.log" >&2; exit 1; }
-	sleep 0.05
-done
-session=$RUN/sessions/$$
-: > "$session"
+session_begin || exit 1
 
-n=0
-until [ -f "$READY" ]; do
-	n=$((n + 1))
-	if [ -f "$FAILED" ] || [ "$n" -ge 1200 ]; then
-		rm -f "$session"
-		echo "wsnetbsd: VM did not come up, see $RUN/monitor.log and $RUN/console.log" >&2
-		exit 1
-	fi
-	sleep 0.05
-done
+user=$(id -un)
+if [ "$user" = root ] && [ "$has_command" = 0 ] && [ ! -e "$STATE/oobe-done" ] && [ -t 0 ]; then
+	/usr/libexec/wsnetbsd/oobe && user=$(cat "$STATE/oobe-done")
+	[ -n "$user" ] || user=root
+fi
+if [ ! -r "$KEYS/$user" ]; then
+	echo "wsnetbsd: $user has no NetBSD account. As root, run: /usr/libexec/wsnetbsd/adduser $user" >&2
+	echo "(wsl -d ${WSL_DISTRO_NAME:-NetBSD} -u root -e /usr/libexec/wsnetbsd/adduser $user)" >&2
+	session_end
+	exit 1
+fi
 
-# quote STRING: render STRING as one single-quoted shell word.
-quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+# Variables WSLENV shares with Linux, plus ones that describe the terminal.
+env=
+for name in $(printf %s "${WSLENV:-}" | tr : '\n' | sed 's|/.*||') \
+	WSLENV WSL_DISTRO_NAME WT_SESSION WT_PROFILE_ID COLORTERM TERM_PROGRAM TERM_PROGRAM_VERSION; do
+	case $name in ''|*[!A-Za-z0-9_]*|[0-9]*) continue ;; esac
+	eval "[ -n \"\${$name+x}\" ]" || continue
+	value=
+	eval "value=\$$name"
+	env="${env}export $name=$(quote "$value"); "
+done
 
 cd_guest="cd $(quote "$PWD") 2>/dev/null || cd"
 if [ "$has_command" = 1 ]; then
-	remote="$cd_guest; $command"
+	remote="$env$cd_guest; $command"
 	if [ -t 0 ] && [ -t 1 ]; then tty=-tt; else tty=-T; fi
 else
-	remote="$cd_guest; exec \${SHELL:-/bin/sh} -l"
+	remote="$env$cd_guest; exec \${SHELL:-/bin/sh} -l"
 	tty=-tt
 fi
 
-ssh_guest "$tty" "$(id -un)@127.0.0.1" "$remote"
+ssh_guest "$user" "$tty" netbsd "$remote"
 rc=$?
-rm -f "$session"
+session_end
 exit "$rc"
