@@ -65,7 +65,7 @@ jobs:
         run: |
           docker run --rm --device /dev/kvm -v "$PWD:/src" -w /src \
             -e WORK=/src/work -e VERSION -e QEMU_CACHED \
-            alpine:3.23 sh -euc '
+            alpine:3.24 sh -euc '
               apk add --no-cache -q git
               git config --global --add safe.directory /src
               [ "$QEMU_CACHED" = true ] || sh build/mkqemu.sh

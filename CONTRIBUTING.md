@@ -64,7 +64,7 @@ seconds after the last session.
 
 The build runs on Alpine Linux x86_64, as root, with `/dev/kvm`. An Alpine WSL
 distribution works, as does
-`docker run --device /dev/kvm -v "$PWD:/src" -w /src alpine:3.23`. The
+`docker run --device /dev/kvm -v "$PWD:/src" -w /src alpine:3.24`. The
 scripts install the packages they need with apk.
 
 ```
