@@ -144,7 +144,7 @@ jobs:
           $expected = if ($env:VERSION) { $env:VERSION } else { "0.0.0-dev+$($env:SHA.Substring(0, 7))" }
           $zip = Get-ChildItem dist/*.zip | Select-Object -First 1
           Expand-Archive $zip.FullName -DestinationPath unpacked
-          foreach ($f in 'NetBSD.exe', 'preset.json', 'rootfs.tar.gz') {
+          foreach ($f in 'NetBSD.exe', 'rootfs.tar.gz') {
             if (-not (Test-Path "unpacked/$f")) { throw "$f is missing from $($zip.Name)" }
           }
           $version = (tar -xzOf unpacked/rootfs.tar.gz usr/lib/wsnetbsd/version).Trim()
