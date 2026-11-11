@@ -21,6 +21,8 @@ tar -xJpf "$H/xserver.tar.xz" -C "$T" \
 	$dri/gallium_dri.so $dri/gallium_dri.so.0 $dri/swrast_dri.so $dri/swrast_dri.so.0
 
 chroot "$T" sh -c 'cd /dev && sh MAKEDEV all'
+# The installer normally does this. Without it HTTPS and pkg_add fail.
+chroot "$T" certctl rehash
 
 # cp -R would copy the Windows-side mode bits the share reports.
 cd "$H/guest"
@@ -56,7 +58,7 @@ sed 's|^AuthorizedKeysFile.*|AuthorizedKeysFile .ssh/authorized_keys /.wsl/keys/
 mv "$T/etc/ssh/sshd_config.new" "$T/etc/ssh/sshd_config"
 cat >> "$T/etc/ssh/sshd_config" <<'EOF'
 
-SetEnv PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/X11R7/bin:/usr/pkg/sbin:/usr/pkg/bin:/usr/local/sbin:/usr/local/bin:/.wsl/bin
+SetEnv PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/X11R7/bin:/usr/pkg/sbin:/usr/pkg/bin:/usr/local/sbin:/usr/local/bin:/.wsl/bin LANG=C.UTF-8
 EOF
 # shellcheck disable=SC2016 # expanded at login
 for f in etc/skel/.profile root/.profile; do

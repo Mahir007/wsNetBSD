@@ -102,7 +102,8 @@ While you have a NetBSD window open, your NetBSD home directory is at
 ### Environment
 
 Variables named in `WSLENV` reach NetBSD, as do the ones Windows Terminal sets.
-The host name is the Windows computer name.
+`LANG` is `C.UTF-8` unless `WSLENV` brings another. The host name is the
+Windows computer name.
 
 ### More users
 

@@ -53,6 +53,10 @@ check "forwards ports open only on localhost" local "$(eventually 'timeout 2 nc 
 
 check "has X11 programs on the PATH" /usr/X11R7/bin/xterm "$($shell -c 'command -v xterm')"
 check "has Mesa's software renderer" yes "$($shell -c 'test -e /usr/X11R7/lib/modules/dri/swrast_dri.so && echo yes')"
+# shellcheck disable=SC2016 # expanded in the guest
+check "sets LANG" C.UTF-8 "$($shell -c 'echo $LANG')"
+# shellcheck disable=SC2016 # expanded in the guest
+check "has CA certificates" yes "$($shell -c 'test -n "$(ls /etc/openssl/certs)" && echo yes')"
 
 # Stands in for WSLg's X server: whatever listens on its socket gets the relay.
 mkdir -p /tmp/.X11-unix
