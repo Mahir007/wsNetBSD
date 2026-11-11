@@ -49,6 +49,11 @@ savecore=NO
 wscons=NO
 update_motd=NO
 no_swap=YES
+
+# /etc/rc.d/wsnetbsd removes this at a clean stop. If NetBSD stopped
+# without warning, or while freeing deleted files, the journal keeps the file
+# system consistent but can leak those blocks. A full check finds them.
+if [ -e /var/db/wsnetbsd.running ]; then fsck_flags="-f -p"; fi
 EOF
 
 # sshd uses the first value it reads, so the stock line has to go.

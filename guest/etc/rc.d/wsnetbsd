@@ -13,19 +13,32 @@ rcvar=$name
 start_cmd="wsnetbsd_start"
 stop_cmd="wsnetbsd_stop"
 pidfile="/var/run/wsnetbsd-watch.pid"
+# Present from boot until a clean stop. rc.conf runs a full file system
+# check at boot if it is still there.
+running=/var/db/wsnetbsd.running
 
 wsnetbsd_start()
 {
+	: > "$running"
 	/usr/libexec/wsnetbsd/init || return 1
 	/usr/libexec/wsnetbsd/watch </dev/null >/dev/null 2>&1 &
 	echo $! > "$pidfile"
 }
 
-# The kernel hangs syncing puffs mounts if their servers are still up at halt.
+free_kb() { df -k / | awk 'NR == 2 { print $4 }'; }
+
 wsnetbsd_stop()
 {
 	[ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null
 	rm -f "$pidfile"
+	# NetBSD frees a deleted file's blocks in the background, about 1 GB
+	# every 8 seconds here. Halting before it finishes leaks the rest until
+	# a full check, so the marker goes only if free space holds still.
+	sync
+	a=$(free_kb); sleep 1.5; b=$(free_kb); sleep 1.5; c=$(free_kb)
+	[ "$a" = "$b" ] && [ "$b" = "$c" ] && rm -f "$running" && sync
+	# The kernel hangs syncing puffs mounts if their servers are still up at
+	# halt.
 	umount -f /mnt
 	umount -f /.wsl
 }

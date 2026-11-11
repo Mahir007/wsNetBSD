@@ -173,7 +173,9 @@ Then run `wsl --shutdown` and start NetBSD again.
 `wsl --shutdown`, `wsl --terminate NetBSD` and shutting Windows down all stop
 NetBSD without warning. The file system journal keeps the disk consistent,
 but files written in the last few seconds can be lost. After closing the last
-NetBSD window, NetBSD halts on its own within `IDLE_HALT_SECONDS`.
+NetBSD window, NetBSD halts on its own within `IDLE_HALT_SECONDS`. The next
+start after a stop without warning takes a few seconds longer, for a full file
+system check.
 
 ### A Windows program says "not found on the Windows PATH"
 

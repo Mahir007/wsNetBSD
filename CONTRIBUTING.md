@@ -55,6 +55,13 @@ QEMU's microvm machine has no SMBIOS tables, so `vmctl` writes a system table
 naming WSL and passes it to the qboot firmware over fw_cfg, the way QEMU's PC
 machines do. NetBSD reads it as `machdep.dmi.*`.
 
+NetBSD frees a deleted file's blocks in the background, about 1 GB every 8
+seconds in the VM. On a journaled file system, a halt before that finishes
+leaks the blocks until a full fsck, which the clean journal never triggers.
+`guest/etc/rc.d/wsnetbsd` keeps `/var/db/wsnetbsd.running` from boot until a
+stop that finds free space settled, and `rc.conf` forces a full fsck at boot
+while it exists.
+
 The microvm machine has no ACPI, so NetBSD can halt but not power off. `vmctl`
 halts it with `rc.shutdown` and `halt`, waits for the console to say so, and
 kills QEMU. `shutdown(8)` takes too long: WSL stops the distribution 15

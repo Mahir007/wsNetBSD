@@ -119,7 +119,7 @@ boot_vm() {
 		-device virtio-rng-device \
 		-chardev "socket,id=con,path=$RUN/console.sock,server=on,wait=off,logfile=$RUN/console.log" \
 		-serial chardev:con \
-		-display none -no-reboot -nodefaults \
+		-display none -nodefaults \
 		-daemonize -pidfile "$RUN/qemu.pid" 9>&-
 	do
 		n=$((n + 1))
