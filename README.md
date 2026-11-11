@@ -192,3 +192,10 @@ system check.
 The list of Windows programs is built from the PATH of the first session after
 the distribution starts. Programs installed since then appear the next time it
 starts, or after `wsl --terminate NetBSD`.
+
+## License
+
+The scripts in this repository are under the MIT license, in `LICENSE`. The
+release also contains NetBSD, Alpine Linux, QEMU and wsldl, each under its own
+license. QEMU is under the GPL, version 2, and is built from the source that
+`build/common.sh` names, with the patch in `build/qemu/`.
