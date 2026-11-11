@@ -34,9 +34,11 @@ shared read-only with NetBSD as `/.wsl/keys`, and both sshds take
 `keys/USER.pub` as the user's authorized key.
 
 The guest's `watch` script sends its listening ports to `hostcall`, which adds
-and removes QEMU `hostfwd` rules through the monitor FIFO. WSL forwards those
-Alpine listeners to Windows. The same script resets the clock when it drifts
-from Alpine's.
+and removes forwards on one ssh connection into the guest (`ssh -O forward`).
+QEMU's `hostfwd` can only reach the guest's external address, while the guest's
+sshd opens each connection from inside and reaches programs that listen only
+on localhost. WSL forwards those Alpine listeners to Windows. The same script
+resets the clock when it drifts from Alpine's.
 
 The monitor mounts a user's NetBSD home over their Alpine home with sshfs
 while they have a session. Windows sees Alpine's files through WSL's 9p

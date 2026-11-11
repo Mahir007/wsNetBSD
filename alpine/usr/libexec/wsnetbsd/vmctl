@@ -42,8 +42,7 @@ boot_vm() {
 	hostname > "$HOSTDIR/hostname"
 
 	: > "$RUN/console.log"
-	rm -f "$RUN/hmp.in" "$RUN/hmp.out" "$RUN/ports"
-	mkfifo -m 600 "$RUN/hmp.in" "$RUN/hmp.out"
+	rm -f "$RUN/ports" "$FORWARD_CTL"
 	ssh_port=$(free_port)
 	echo "$ssh_port" > "$SSH_PORT_FILE"
 	# The guest reaches Alpine at 10.0.2.100:22, where QEMU starts an sshd per
@@ -64,11 +63,8 @@ boot_vm() {
 		-device virtio-rng-device \
 		-chardev "socket,id=con,path=$RUN/console.sock,server=on,wait=off,logfile=$RUN/console.log" \
 		-serial chardev:con \
-		-chardev pipe,id=hmp,path="$RUN/hmp" -mon chardev=hmp,mode=readline \
 		-display none -no-reboot -nodefaults \
 		-daemonize -pidfile "$RUN/qemu.pid" 9>&-
-	# QEMU's monitor blocks once nobody reads its output.
-	cat "$RUN/hmp.out" > /dev/null 9>&- &
 }
 
 start_vm() {
@@ -85,6 +81,7 @@ start_vm() {
 stop_vm() {
 	rm -f "$READY"
 	unmount_homes
+	ssh_guest root -S "$FORWARD_CTL" -O exit netbsd >/dev/null 2>&1 || true
 	running || return 0
 	# shutdown(8) sleeps for several seconds, which loses the race against WSL
 	# stopping the distro 15 s after the last session ends. The halt runs

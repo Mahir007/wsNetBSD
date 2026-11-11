@@ -48,6 +48,8 @@ check "calls into Alpine" yes \
 
 $shell -c 'nohup sh -c "echo forwarded | nc -N -l 8123" >/dev/null 2>&1 &'
 check "forwards listening ports" forwarded "$(eventually 'timeout 2 nc 127.0.0.1 8123 </dev/null')"
+$shell -c 'nohup sh -c "echo local | nc -N -l 127.0.0.1 8124" >/dev/null 2>&1 &'
+check "forwards ports open only on localhost" local "$(eventually 'timeout 2 nc 127.0.0.1 8124 </dev/null')"
 
 # No sessions are left, so the monitor halts the guest.
 n=0

@@ -3,7 +3,7 @@
 # "DIR REQUEST [ARG...]", each word single-quoted, over ssh. Requests:
 #   exec PROGRAM [ARG...]   run a Windows program in DIR
 #   wslpath [ARG...]        translate a path, as wslpath(1) in DIR
-#   ports [PORT...]         forward these guest TCP ports (root only)
+#   ports [HOST:PORT...]    forward these guest TCP ports (root only)
 #   time                    print the time in seconds since the epoch
 # shellcheck source=common
 . /usr/libexec/wsnetbsd/common
@@ -25,12 +25,9 @@ enter_dir() {
 	cd "$HOME" 2>/dev/null || cd /
 }
 
-# hmp COMMAND: sends COMMAND to QEMU's monitor. The FIFO write blocks if QEMU
-# has gone, hence the timeout.
-hmp() {
-	# shellcheck disable=SC2016 # expanded by the inner sh
-	timeout 2 sh -c 'printf "%s\n" "$1" > "$2"' sh "$1" "$RUN/hmp.in"
-}
+# forward OPTION...: sends a control command to the ssh connection that
+# carries forwarded ports.
+forward() { ssh_guest root -S "$FORWARD_CTL" "$@" netbsd; }
 
 case $request in
 exec)
@@ -55,22 +52,46 @@ wslpath)
 	exec wslpath "$@"
 	;;
 ports)
+	# Each HOST:PORT is where a guest program listens, as seen from inside the
+	# guest. The forwards go over ssh, so the guest's sshd opens each
+	# connection from inside the guest and reaches programs that listen only
+	# on its localhost. QEMU's own forwarding cannot.
 	[ "$(id -u)" = 0 ] || { echo "hostcall: ports is for root" >&2; exit 1; }
-	[ -p "$RUN/hmp.in" ] || exit 1
+	if ! forward -O check 2>/dev/null; then
+		rm -f "$RUN/ports" "$FORWARD_CTL"
+		# Its output would hold the guest's connection open.
+		ssh_guest root -M -S "$FORWARD_CTL" -f -N -o ServerAliveInterval=5 netbsd \
+			</dev/null >/dev/null 2>&1 || exit 1
+	fi
 	want=
-	for p; do
-		case $p in ''|*[!0-9]*) continue ;; esac
-		case " $NO_FORWARD_PORTS " in *" $p "*) continue ;; esac
-		want="$want $p"
+	for spec; do
+		case ${spec%:*} in 127.0.0.1|10.0.2.15|'[::1]') ;; *) continue ;; esac
+		port=${spec##*:}
+		case $port in ''|*[!0-9]*) continue ;; esac
+		case " $NO_FORWARD_PORTS " in *" $port "*) continue ;; esac
+		want="$want $spec"
 	done
 	have=$(cat "$RUN/ports" 2>/dev/null)
-	for p in $have; do
-		case " $want " in *" $p "*) ;; *) hmp "hostfwd_remove net0 tcp:127.0.0.1:$p" ;; esac
+	kept=
+	rc=0
+	for spec in $have; do
+		case " $want " in
+		*" $spec "*) kept="$kept $spec" ;;
+		*) forward -O cancel -L "127.0.0.1:${spec##*:}:$spec" ;;
+		esac
 	done
-	for p in $want; do
-		case " $have " in *" $p "*) ;; *) hmp "hostfwd_add net0 tcp:127.0.0.1:$p-:$p" ;; esac
+	# A port another distribution already listens on fails, and the guest
+	# tries it again on its next call.
+	for spec in $want; do
+		case " $have " in *" $spec "*) continue ;; esac
+		if forward -O forward -L "127.0.0.1:${spec##*:}:$spec"; then
+			kept="$kept $spec"
+		else
+			rc=1
+		fi
 	done
-	printf '%s\n' "${want# }" > "$RUN/ports"
+	printf '%s\n' "${kept# }" > "$RUN/ports"
+	exit "$rc"
 	;;
 time)
 	date +%s

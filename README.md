@@ -72,8 +72,8 @@ translates paths with the same options as in WSL.
 ### Ports
 
 TCP ports that NetBSD programs listen on are forwarded to Windows `localhost`
-within a second or two. A program has to listen on all addresses: one that
-listens only on `127.0.0.1` stays private to NetBSD.
+within a second or two, including ports open only on `127.0.0.1` or `::1`. A
+port that another WSL distribution is using is forwarded once it is free.
 
 ### Your files from Windows
 
