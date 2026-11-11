@@ -75,6 +75,25 @@ TCP ports that NetBSD programs listen on are forwarded to Windows `localhost`
 within a second or two, including ports open only on `127.0.0.1` or `::1`. A
 port that another WSL distribution is using is forwarded once it is free.
 
+### Graphical programs
+
+X11 programs open on the Windows desktop through WSLg, and PulseAudio programs
+play through Windows:
+
+```
+xclock &
+```
+
+X11's own programs are included, and OpenGL programs run on Mesa's software
+renderer. For programs from pkgsrc that draw their own text, install a font:
+
+```
+PKG_PATH=https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD/x86_64/11.1/All pkg_add dejavu-ttf
+```
+
+NetBSD halts a few seconds after the last terminal closes, and takes any
+graphical programs with it. Wayland and GPU acceleration are not available.
+
 ### Your files from Windows
 
 While you have a NetBSD window open, your NetBSD home directory is at

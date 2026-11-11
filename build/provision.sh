@@ -13,6 +13,12 @@ for f in "$H"/sets/*.tar.xz; do
 	echo "extracting ${f##*/}"
 	tar -xJpf "$f" -C "$T"
 done
+# Mesa's software renderer, the one file of the X servers' set NetBSD needs.
+# Without it OpenGL programs exit with an X error: WSLg's X server refuses
+# the indirect rendering Mesa falls back to.
+dri=./usr/X11R7/lib/modules/dri
+tar -xJpf "$H/xserver.tar.xz" -C "$T" \
+	$dri/gallium_dri.so $dri/gallium_dri.so.0 $dri/swrast_dri.so $dri/swrast_dri.so.0
 
 chroot "$T" sh -c 'cd /dev && sh MAKEDEV all'
 
@@ -50,7 +56,7 @@ sed 's|^AuthorizedKeysFile.*|AuthorizedKeysFile .ssh/authorized_keys /.wsl/keys/
 mv "$T/etc/ssh/sshd_config.new" "$T/etc/ssh/sshd_config"
 cat >> "$T/etc/ssh/sshd_config" <<'EOF'
 
-SetEnv PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/pkg/sbin:/usr/pkg/bin:/usr/local/sbin:/usr/local/bin:/.wsl/bin
+SetEnv PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/X11R7/bin:/usr/pkg/sbin:/usr/pkg/bin:/usr/local/sbin:/usr/local/bin:/.wsl/bin
 EOF
 # shellcheck disable=SC2016 # expanded at login
 for f in etc/skel/.profile root/.profile; do

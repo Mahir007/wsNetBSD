@@ -26,8 +26,11 @@ The other direction uses a slirp `guestfwd` rule. A guest connection to
 `10.0.2.100:22` makes QEMU start `sshd -i` in Alpine with
 `alpine/usr/lib/wsnetbsd/sshd_config`, whose forced command is
 `alpine/usr/libexec/wsnetbsd/hostcall`. The guest uses it to run Windows
-programs, translate paths, forward ports and read the time. Nothing listens
-on a port in WSL's network namespace, which every distribution shares.
+programs, translate paths, forward ports and read the time. Ports 6000 and
+4713 on the same address relay to WSLg's X server and PulseAudio sockets with
+`nc -U`. The login shim sets `DISPLAY` and `PULSE_SERVER` to match when those
+sockets exist. Nothing listens on a port in WSL's network namespace, which
+every distribution shares.
 
 Each user has one key pair in `/var/lib/wsnetbsd/host/keys`. That directory is
 shared read-only with NetBSD as `/.wsl/keys`, and both sshds take

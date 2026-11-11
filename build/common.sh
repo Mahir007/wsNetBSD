@@ -5,7 +5,9 @@ NETBSD_VERSION=11.1
 # Any NetBSD mirror works: the files are checked against build/netbsd-*.sha512.
 NETBSD_MIRROR=${NETBSD_MIRROR:-https://cdn.netbsd.org/pub/NetBSD}
 NETBSD_URL=$NETBSD_MIRROR/NetBSD-$NETBSD_VERSION
-NETBSD_SETS="base comp etc games man misc modules rescue text"
+# xbase and xetc hold the X11 libraries and clients, for WSLg. mkimage.sh
+# also takes Mesa's software renderer from xserver.
+NETBSD_SETS="base comp etc games man misc modules rescue text xbase xetc"
 
 IMAGE_SIZE=64G
 
@@ -16,9 +18,9 @@ ALPINE_VERSION=3.23.8
 ALPINE_SHA512=ebcdfe1819e4c8a53cfdfc9a0bfa51ccda440698dce909b887a34209185d3a34d9028d715b38444ac2bf1b211b3721dba95ef4dab1821727077071fc382f074b
 # The libraries the QEMU from mkqemu.sh links.
 QEMU_LIBS="glib libslirp libfdt zlib pcre2 libintl"
-# Packages in the rootfs: QEMU's libraries, ssh both ways, and sshfs to show
-# NetBSD homes to Windows.
-ALPINE_PACKAGES="$QEMU_LIBS openssh-client-default openssh-keygen openssh-server sshfs"
+# Packages in the rootfs: QEMU's libraries, ssh both ways, sshfs to show
+# NetBSD homes to Windows, and nc to relay WSLg's sockets to the guest.
+ALPINE_PACKAGES="$QEMU_LIBS netcat-openbsd openssh-client-default openssh-keygen openssh-server sshfs"
 
 # The launcher's source. Go checks its modules against go.sum.
 WSLDL_VERSION=26032000

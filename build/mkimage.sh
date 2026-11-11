@@ -24,6 +24,9 @@ for s in $NETBSD_SETS kern-MICROVM; do
 	fetch_netbsd "amd64/binary/sets/$s.tar.xz" "$DL/sets/$s.tar.xz"
 	ln "$DL/sets/$s.tar.xz" "$SHARE/sets/$s.tar.xz"
 done
+# Outside sets/: provision.sh takes only Mesa's software renderer from it.
+fetch_netbsd amd64/binary/sets/xserver.tar.xz "$DL/sets/xserver.tar.xz"
+ln "$DL/sets/xserver.tar.xz" "$SHARE/xserver.tar.xz"
 
 [ -f "$DL/netbsd-MICROVM" ] || gunzip -k "$DL/netbsd-MICROVM.gz"
 [ -f "$WORK/live.img" ] || gunzip -kc "$DL/$LIVE" > "$WORK/live.img"

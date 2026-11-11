@@ -45,8 +45,14 @@ boot_vm() {
 	rm -f "$RUN/ports" "$FORWARD_CTL"
 	ssh_port=$(free_port)
 	echo "$ssh_port" > "$SSH_PORT_FILE"
-	# The guest reaches Alpine at 10.0.2.100:22, where QEMU starts an sshd per
-	# connection. It runs Windows programs and forwards ports for the guest.
+	# The guest reaches Alpine at 10.0.2.100, where QEMU starts a program for
+	# each connection: on port 22 an sshd that runs Windows programs and
+	# forwards ports for the guest, on 6000 and 4713 a relay to WSLg's X
+	# server and sound server.
+	net="user,id=net0,ipv6=off,hostfwd=tcp:127.0.0.1:$ssh_port-:22"
+	net="$net,guestfwd=tcp:10.0.2.100:22-cmd:/usr/sbin/sshd -i -f $LIB/sshd_config"
+	net="$net,guestfwd=tcp:10.0.2.100:6000-cmd:/usr/bin/nc -N -U /tmp/.X11-unix/X0"
+	net="$net,guestfwd=tcp:10.0.2.100:4713-cmd:/usr/bin/nc -N -U /mnt/wslg/PulseServer"
 	"$LIB/qemu-system-x86_64" -L "$LIB" \
 		-M microvm,x-option-roms=off,rtc=on,acpi=off,pic=off,accel=kvm \
 		-m "$(memory_mib)" -smp "$(nproc)" -cpu host,+invtsc \
@@ -55,7 +61,7 @@ boot_vm() {
 		-device virtio-blk-device,drive=root \
 		-drive file="$IMAGE",format=qcow2,if=none,id=root,cache=writeback,aio=threads,discard=unmap \
 		-device virtio-net-device,netdev=net0 \
-		-netdev "user,id=net0,ipv6=off,hostfwd=tcp:127.0.0.1:$ssh_port-:22,guestfwd=tcp:10.0.2.100:22-cmd:/usr/sbin/sshd -i -f $LIB/sshd_config" \
+		-netdev "$net" \
 		-fsdev local,id=host,path="$HOSTDIR",security_model=none,readonly=on \
 		-device virtio-9p-device,fsdev=host,mount_tag=host \
 		-fsdev local,id=mnt,path=/mnt,security_model=none,multidevs=remap \

@@ -49,6 +49,9 @@ for name in $(printf %s "${WSLENV:-}" | tr : '\n' | sed 's|/.*||') \
 	eval "value=\$$name"
 	env="${env}export $name=$(quote "$value"); "
 done
+# WSLg's X server and sound server, which QEMU relays from 10.0.2.100.
+[ -S /tmp/.X11-unix/X0 ] && env="${env}export DISPLAY=10.0.2.100:0; "
+[ -S /mnt/wslg/PulseServer ] && env="${env}export PULSE_SERVER=tcp:10.0.2.100:4713; "
 
 cd_guest="cd $(quote "$PWD") 2>/dev/null || cd"
 if [ "$has_command" = 1 ]; then

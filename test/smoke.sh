@@ -51,6 +51,18 @@ check "forwards listening ports" forwarded "$(eventually 'timeout 2 nc 127.0.0.1
 $shell -c 'nohup sh -c "echo local | nc -N -l 127.0.0.1 8124" >/dev/null 2>&1 &'
 check "forwards ports open only on localhost" local "$(eventually 'timeout 2 nc 127.0.0.1 8124 </dev/null')"
 
+check "has X11 programs on the PATH" /usr/X11R7/bin/xterm "$($shell -c 'command -v xterm')"
+check "has Mesa's software renderer" yes "$($shell -c 'test -e /usr/X11R7/lib/modules/dri/swrast_dri.so && echo yes')"
+
+# Stands in for WSLg's X server: whatever listens on its socket gets the relay.
+mkdir -p /tmp/.X11-unix
+(echo relayed | nc -N -l -U /tmp/.X11-unix/X0) &
+n=0
+until [ -S /tmp/.X11-unix/X0 ] || [ "$n" -gt 20 ]; do sleep 0.1; n=$((n + 1)); done
+# shellcheck disable=SC2016 # expanded in the guest
+check "sets DISPLAY when WSLg is there" 10.0.2.100:0 "$($shell -c 'echo $DISPLAY')"
+check "relays WSLg's X socket" relayed "$($shell -c 'timeout 5 nc -N 10.0.2.100 6000 </dev/null')"
+
 # No sessions are left, so the monitor halts the guest.
 n=0
 while [ "$n" -lt 60 ] && /usr/libexec/wsnetbsd/vmctl status >/dev/null; do
