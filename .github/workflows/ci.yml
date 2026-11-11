@@ -70,6 +70,7 @@ jobs:
               git config --global --add safe.directory /src
               [ "$QEMU_CACHED" = true ] || sh build/mkqemu.sh
               sh build/mkimage.sh
+              sh build/mklauncher.sh
               sh build/mkdist.sh'
           sudo chown -R "$(id -u):$(id -g)" work
       - name: Save downloads
@@ -150,3 +151,5 @@ jobs:
           $version = (tar -xzOf unpacked/rootfs.tar.gz usr/lib/wsnetbsd/version).Trim()
           if ($version -ne $expected) { throw "rootfs says $version, expected $expected" }
           "rootfs version $version"
+          $description = (Get-Item unpacked/NetBSD.exe).VersionInfo.FileDescription
+          if ($description -ne 'NetBSD') { throw "NetBSD.exe says it is '$description'" }

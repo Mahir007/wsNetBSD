@@ -59,9 +59,10 @@ distribution works, as does
 scripts install the packages they need with apk.
 
 ```
-sh build/mkqemu.sh    # QEMU with only the microvm devices used, the slowest step
-sh build/mkimage.sh   # the NetBSD disk, about 1 minute
-sh build/mkdist.sh    # the .zip and .wsl, about 1 minute
+sh build/mkqemu.sh       # QEMU with only the microvm devices used, the slowest step
+sh build/mkimage.sh      # the NetBSD disk, about 1 minute
+sh build/mklauncher.sh   # NetBSD.exe, about 20 seconds
+sh build/mkdist.sh       # the .zip and .wsl, about 1 minute
 ```
 
 Everything goes to `WORK`, `/var/tmp/wsnetbsd-build` by default. The archives
@@ -73,6 +74,10 @@ builder VM. `build/provision.sh` runs inside it, creates the file system on a
 blank 64 GB sparse disk and extracts the sets into it. `mkdist.sh` converts
 the disk to qcow2, which holds only the blocks in use and boots without
 unpacking.
+
+`mklauncher.sh` compiles wsldl from source, since the released `wsldl.exe` has
+no icon. `alpine/usr/lib/wsnetbsd/netbsd.ico` is the icon for the launcher and
+for the Start menu entry of a `.wsl` install.
 
 Downloads are checked against pinned hashes: NetBSD's in
 `build/netbsd-VERSION.sha512`, the others in `build/common.sh`. For a new

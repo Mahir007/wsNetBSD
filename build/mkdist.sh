@@ -1,9 +1,9 @@
 #!/bin/sh
 # Assembles the release: Alpine's minirootfs with the packages the VM needs,
 # the QEMU from mkqemu.sh, the kernel and disk from mkimage.sh, and the
-# overlay in alpine/. Writes NetBSD-VERSION.zip, holding the wsldl launcher
-# and rootfs.tar.gz, and NetBSD-VERSION.wsl, the same rootfs for
-# `wsl --install --from-file`.
+# overlay in alpine/. Writes NetBSD-VERSION.zip, holding the launcher from
+# mklauncher.sh and rootfs.tar.gz, and NetBSD-VERSION.wsl, the same rootfs
+# for `wsl --install --from-file`.
 #
 # VERSION defaults to 0.0.0-dev+COMMIT.
 set -eu
@@ -11,8 +11,8 @@ set -eu
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 OUT=$WORK/out
-for f in kernel root.img qemu/qemu-system-x86_64 qemu/qboot.rom; do
-	[ -f "$OUT/$f" ] || die "$OUT/$f is missing; run mkqemu.sh and mkimage.sh first"
+for f in kernel root.img qemu/qemu-system-x86_64 qemu/qboot.rom "$DISTRO_NAME.exe"; do
+	[ -f "$OUT/$f" ] || die "$OUT/$f is missing; run mkqemu.sh, mkimage.sh and mklauncher.sh first"
 done
 # GNU tar for reproducible archives.
 apk add --no-cache -q tar gzip zip qemu-img
@@ -25,8 +25,6 @@ EPOCH=$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || date +%s)
 MINIROOTFS=alpine-minirootfs-$ALPINE_VERSION-x86_64.tar.gz
 fetch "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/releases/x86_64/$MINIROOTFS" \
 	"$DL/$MINIROOTFS" "$ALPINE_SHA512"
-fetch "https://github.com/yuk7/wsldl/releases/download/$WSLDL_VERSION/wsldl.exe" \
-	"$DL/wsldl-$WSLDL_VERSION.exe" "$WSLDL_SHA256"
 
 R=$WORK/rootfs
 log "assembling the root filesystem"
@@ -65,7 +63,7 @@ tar -C "$R" --create --numeric-owner --sort=name --mtime="@$EPOCH" \
 
 # No preset.json: its wslversion makes wsldl run `wsl --set-version`, which
 # fails on a distribution that is already WSL 2, the default.
-cp "$DL/wsldl-$WSLDL_VERSION.exe" "$DIST/zip/$DISTRO_NAME.exe"
+cp "$OUT/$DISTRO_NAME.exe" "$DIST/zip/$DISTRO_NAME.exe"
 touch -d "@$EPOCH" "$DIST/zip"/*
 ZIP=$DIST/$DISTRO_NAME-$VERSION.zip
 WSL=$DIST/$DISTRO_NAME-$VERSION.wsl

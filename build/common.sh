@@ -20,8 +20,10 @@ QEMU_LIBS="glib libslirp libfdt zlib pcre2 libintl"
 # NetBSD homes to Windows.
 ALPINE_PACKAGES="$QEMU_LIBS openssh-client-default openssh-keygen openssh-server sshfs"
 
+# The launcher's source. Go checks its modules against go.sum.
 WSLDL_VERSION=26032000
-WSLDL_SHA256=89530bfe71b727ab14146c5214973deb01aff7cc1eb46e3fc1ae4994ffce4ed5
+WSLDL_SHA256=a79f0609c5ba64d558351c2e32adb8525763d21f125ab6cffffbb64522008add
+GOVERSIONINFO_VERSION=v1.7.0
 
 DISTRO_NAME=NetBSD
 
