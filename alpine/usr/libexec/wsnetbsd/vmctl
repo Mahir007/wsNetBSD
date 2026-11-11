@@ -98,7 +98,10 @@ boot_vm() {
 	net="$net,guestfwd=tcp:10.0.2.100:22-cmd:/usr/sbin/sshd -i -f $LIB/sshd_config"
 	net="$net,guestfwd=tcp:10.0.2.100:6000-cmd:/usr/bin/nc -N -U /tmp/.X11-unix/X0"
 	net="$net,guestfwd=tcp:10.0.2.100:4713-cmd:/usr/bin/nc -N -U /mnt/wslg/PulseServer"
-	"$LIB/qemu-system-x86_64" -L "$LIB" \
+	# Right after `wsl --terminate`, the last run's QEMU can hold the disk's
+	# lock for a moment while its writes drain.
+	n=0
+	until "$LIB/qemu-system-x86_64" -L "$LIB" \
 		-M microvm,x-option-roms=off,rtc=on,acpi=off,pic=off,accel=kvm \
 		-m "$(memory_mib)" -smp "$(nproc)" -cpu host,+invtsc \
 		-kernel "$LIB/kernel" -append "root=ld0a console=com" \
@@ -118,6 +121,11 @@ boot_vm() {
 		-serial chardev:con \
 		-display none -no-reboot -nodefaults \
 		-daemonize -pidfile "$RUN/qemu.pid" 9>&-
+	do
+		n=$((n + 1))
+		[ "$n" -lt 10 ] || return 1
+		sleep 1
+	done
 }
 
 start_vm() {
@@ -247,6 +255,8 @@ cmd_monitor() {
 	idle=0
 	seen=
 	while :; do
+		# QEMU can die without stop_vm: a crash, or a kill from outside.
+		running || rm -f "$READY"
 		prune_sessions
 		sessions=$(ls -A "$SESSIONS")
 		if [ -n "$sessions" ]; then
