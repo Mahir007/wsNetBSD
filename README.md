@@ -84,8 +84,9 @@ play through Windows:
 xclock &
 ```
 
-X11's own programs are included, and OpenGL programs run on Mesa's software
-renderer. For programs from pkgsrc that draw their own text, install a font:
+X11's own programs are included, and OpenGL programs run on Mesa's llvmpipe
+renderer, on all of WSL's CPUs. For programs from pkgsrc that draw their own
+text, install a font:
 
 ```
 PKG_PATH=https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD/x86_64/11.1/All pkg_add dejavu-ttf
@@ -93,6 +94,24 @@ PKG_PATH=https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD/x86_64/11.1/All pkg_a
 
 NetBSD halts a few seconds after the last terminal closes, and takes any
 graphical programs with it. Wayland and GPU acceleration are not available.
+Frames reach Windows over a network connection, so a full-screen OpenGL
+program manages only a few frames per second.
+
+### OpenGL ES and OpenCL
+
+NetBSD's own Mesa has no OpenGL ES libraries. Mesa from pkgsrc adds them, and
+also renders with llvmpipe:
+
+```
+PKG_PATH=https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD/x86_64/11.1/All pkg_add MesaLib
+```
+
+OpenCL runs on the CPU with PoCL, which brings LLVM and clang, about 220 MB.
+`opencl-headers` is for building OpenCL programs:
+
+```
+PKG_PATH=https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD/x86_64/11.1/All pkg_add pocl opencl-headers
+```
 
 ### Your files from Windows
 
@@ -192,6 +211,14 @@ system check.
 The list of Windows programs is built from the PATH of the first session after
 the distribution starts. Programs installed since then appear the next time it
 starts, or after `wsl --terminate NetBSD`.
+
+### An OpenCL program stops with "Operation not supported"
+
+The full message is
+`PTHREAD ERROR in pocl_async_callback_init():2643: Operation not supported (45)`.
+PoCL starts threads, which on NetBSD works only in a program that loaded
+`libpthread` when it started. Link the program with `-pthread`, or run it with
+`LD_PRELOAD=/usr/lib/libpthread.so`.
 
 ## License
 
