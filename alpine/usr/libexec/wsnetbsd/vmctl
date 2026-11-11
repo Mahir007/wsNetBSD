@@ -31,6 +31,50 @@ free_port() {
 	echo "$port"
 }
 
+# le16 N: prints N as two bytes, low byte first.
+# shellcheck disable=SC2059 # the format is the octal escapes
+le16() { printf "\\$(printf %03o $(($1 & 255)))\\$(printf %03o $(($1 >> 8)))"; }
+
+# Writes SMBIOS tables for QEMU's firmware to install. NetBSD shows them as
+# machdep.dmi.*, and fastfetch's Host line names WSL, as it does for Linux
+# distributions. The firmware adds its own BIOS table, fills in the table
+# address and fixes both checksums.
+write_smbios() {
+	product="Windows Subsystem for Linux - ${WSL_DISTRO_NAME:-NetBSD}"
+	version=$(wslinfo --wsl-version 2>/dev/null) || version=
+	# Type 1, the system: strings for the vendor, product and version, no
+	# serial number, a zero UUID, woken by the power switch.
+	{
+		printf '\001\031'
+		le16 256
+		if [ -n "$version" ]; then printf '\001\002\003\000'; else printf '\001\002\000\000'; fi
+		printf '\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\006'
+		printf '%s\000' QEMU "$product"
+		[ -z "$version" ] || printf '%s\000' "$version"
+		printf '\000'
+	} > "$RUN/smbios-tables"
+	# NetBSD copies 128 bytes from the start of a string and ignores the
+	# string unless that much of the tables follows it. Type 126, an inactive
+	# structure that readers skip, pads them out. Type 127 ends them.
+	{
+		printf '\176\204'
+		le16 512
+		printf '\000%.0s' $(seq 130)
+		printf '\177\004\000\177\000\000'
+	} >> "$RUN/smbios-tables"
+	# The SMBIOS 2.8 entry point, in its 32-bit form, which the firmware reads.
+	# The largest structure is the padding, 134 bytes.
+	{
+		printf '_SM_\000\037\002\010'
+		le16 134
+		printf '\000\000\000\000\000\000_DMI_\000'
+		le16 "$(wc -c < "$RUN/smbios-tables")"
+		printf '\000\000\000\000'
+		le16 3
+		printf '\050'
+	} > "$RUN/smbios-anchor"
+}
+
 boot_vm() {
 	if [ ! -c /dev/kvm ]; then
 		echo "wsnetbsd: /dev/kvm is missing. NetBSD needs WSL 2 with nested virtualization." >&2
@@ -43,6 +87,7 @@ boot_vm() {
 
 	: > "$RUN/console.log"
 	rm -f "$RUN/ports" "$FORWARD_CTL"
+	write_smbios
 	ssh_port=$(free_port)
 	echo "$ssh_port" > "$SSH_PORT_FILE"
 	# The guest reaches Alpine at 10.0.2.100, where QEMU starts a program for
@@ -57,6 +102,8 @@ boot_vm() {
 		-M microvm,x-option-roms=off,rtc=on,acpi=off,pic=off,accel=kvm \
 		-m "$(memory_mib)" -smp "$(nproc)" -cpu host,+invtsc \
 		-kernel "$LIB/kernel" -append "root=ld0a console=com" \
+		-fw_cfg name=etc/smbios/smbios-anchor,file="$RUN/smbios-anchor" \
+		-fw_cfg name=etc/smbios/smbios-tables,file="$RUN/smbios-tables" \
 		-global virtio-mmio.force-legacy=false \
 		-device virtio-blk-device,drive=root \
 		-drive file="$IMAGE",format=qcow2,if=none,id=root,cache=writeback,aio=threads,discard=unmap \

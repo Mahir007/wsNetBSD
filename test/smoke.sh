@@ -55,6 +55,8 @@ check "has X11 programs on the PATH" /usr/X11R7/bin/xterm "$($shell -c 'command 
 check "has Mesa's software renderer" yes "$($shell -c 'test -e /usr/X11R7/lib/modules/dri/swrast_dri.so && echo yes')"
 # shellcheck disable=SC2016 # expanded in the guest
 check "sets LANG" C.UTF-8 "$($shell -c 'echo $LANG')"
+check "describes the machine as WSL" "Windows Subsystem for Linux - NetBSD" \
+	"$($shell -c 'sysctl -n machdep.dmi.system-product')"
 # shellcheck disable=SC2016 # expanded in the guest
 check "has CA certificates" yes "$($shell -c 'test -n "$(ls /etc/openssl/certs)" && echo yes')"
 

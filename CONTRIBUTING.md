@@ -51,6 +51,10 @@ server, and so sees the NetBSD home.
 first-run script leaves the user in `/var/lib/wsnetbsd/default-user` and the
 monitor applies it after the next idle halt.
 
+QEMU's microvm machine has no SMBIOS tables, so `vmctl` writes a system table
+naming WSL and passes it to the qboot firmware over fw_cfg, the way QEMU's PC
+machines do. NetBSD reads it as `machdep.dmi.*`.
+
 The microvm machine has no ACPI, so NetBSD can halt but not power off. `vmctl`
 halts it with `rc.shutdown` and `halt`, waits for the console to say so, and
 kills QEMU. `shutdown(8)` takes too long: WSL stops the distribution 15
