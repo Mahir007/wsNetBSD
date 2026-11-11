@@ -7,7 +7,6 @@ set -eu
 . /usr/libexec/wsnetbsd/common
 
 LIB=/usr/lib/wsnetbsd
-IMAGE=$STATE/root.qcow2
 HOST_KEY=$STATE/ssh_host_ed25519_key
 
 running() { [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; }
@@ -109,7 +108,7 @@ boot_vm() {
 		-fw_cfg name=etc/smbios/smbios-tables,file="$RUN/smbios-tables" \
 		-global virtio-mmio.force-legacy=false \
 		-device virtio-blk-device,drive=root \
-		-drive file="$IMAGE",format=qcow2,if=none,id=root,cache=writeback,aio=threads,discard=unmap \
+		-drive file="$IMAGE",format=qcow2,if=none,id=root,cache=writeback,aio=threads,discard=unmap,detect-zeroes=unmap \
 		-device virtio-net-device,netdev=net0 \
 		-netdev "$net" \
 		-fsdev local,id=host,path="$HOSTDIR",security_model=none,readonly=on \

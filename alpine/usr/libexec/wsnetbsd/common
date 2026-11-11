@@ -6,6 +6,8 @@ READY=$RUN/ready
 FAILED=$RUN/failed
 SESSIONS=$RUN/sessions
 STATE=/var/lib/wsnetbsd
+# NetBSD's disk. QEMU leaves a hole in it wherever the guest writes zeros.
+IMAGE=$STATE/root.qcow2
 # Shared read-only with the guest, which mounts it at /.wsl.
 HOSTDIR=$STATE/host
 # One key pair per user. The guest's sshd and the Alpine sshd that runs

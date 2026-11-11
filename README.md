@@ -142,8 +142,18 @@ about 3 seconds to halt.
 
 ### Disk
 
-NetBSD has a 64 GB disk, stored as a file that grows as you use it. Deleting
-files in NetBSD gives the space back.
+NetBSD has a 64 GB disk, stored as a file that grows as you use it. The file
+does not shrink when you delete files in NetBSD, which reuses the space. To
+give that space back:
+
+```
+wsl -d NetBSD -u root -e /usr/libexec/wsnetbsd/compact
+```
+
+It fills NetBSD's free space with zeros, which QEMU leaves out of the file.
+That takes about 20 minutes for 50 GB of free space, and until it finishes
+programs in NetBSD can run out of disk space. Windows gets the space back if the distribution's virtual
+disk is sparse: `wsl --manage NetBSD --set-sparse true`.
 
 ## Troubleshooting
 

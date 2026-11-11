@@ -1,0 +1,58 @@
+#!/bin/sh
+# compact: gives the space of files deleted in NetBSD back to the disk file.
+# Run as root in the Alpine layer.
+#
+# NetBSD ignores discard on its journaled root file system, so the disk file
+# keeps every block NetBSD has ever written. This fills NetBSD's free space
+# with a file of zeros and deletes it. QEMU turns zeros into holes in the
+# disk file.
+# shellcheck source=common
+. /usr/libexec/wsnetbsd/common
+
+[ "$(id -u)" = 0 ] || { echo "compact: run as root" >&2; exit 1; }
+
+trap session_end EXIT
+trap : INT
+session_begin || exit 1
+
+before=$(du -m "$IMAGE" | cut -f1)
+echo "Filling NetBSD's free space with zeros, about 20 minutes for 50 GB. Until it"
+echo "finishes, programs in NetBSD can run out of disk space."
+# Each write waits on a round trip through two layers of virtualization, so
+# four writers fill about twice as fast as one. More are no faster.
+# shellcheck disable=SC2016 # expanded in the guest
+ssh_guest root -n -T netbsd '
+	f=/var/tmp/.wsnetbsd-compact
+	pids=
+	trap "kill \$pids 2>/dev/null; rm -f $f.*; sync" EXIT HUP INT TERM
+	for i in 1 2 3 4; do
+		dd if=/dev/zero of=$f.$i bs=1m 2>/dev/null &
+		pids="$pids $!"
+	done
+	n=0
+	while :; do
+		running=
+		for p in $pids; do kill -0 $p 2>/dev/null && running=1; done
+		[ -n "$running" ] || break
+		n=$((n + 1))
+		[ $((n % 30)) != 0 ] || df -h / | awk "NR == 2 { print \$4 \" left to fill\" }"
+		sleep 1
+	done
+	rm -f $f.*
+	sync
+	# NetBSD frees the blocks in the background, and a halt before it
+	# finishes would leak them. This session keeps NetBSD up until then.
+	echo "Waiting for NetBSD to free the space again."
+	prev=
+	same=0
+	n=0
+	while [ $same -lt 3 ]; do
+		sleep 2
+		n=$((n + 1))
+		used=$(df -k / | awk "NR == 2 { print \$3 }")
+		if [ "$used" = "$prev" ]; then same=$((same + 1)); else same=0; fi
+		prev=$used
+		[ $((n % 15)) != 0 ] || df -h / | awk "NR == 2 { print \$3 \" still in use\" }"
+	done'
+after=$(du -m "$IMAGE" | cut -f1)
+echo "The disk file went from $before MiB to $after MiB."
