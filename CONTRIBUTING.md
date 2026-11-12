@@ -68,6 +68,13 @@ leaks the blocks until a full fsck, which the clean journal never triggers.
 stop that finds free space settled, and `rc.conf` forces a full fsck at boot
 while it exists.
 
+QEMU's serial console is the socket `/run/wsnetbsd/console.sock`, which it
+also logs to `console.log`. The `console` script registers a session but does
+not wait for `ready`, and connects the terminal to the socket with `nc -U`.
+It makes Ctrl-] the terminal's only signal key, so Ctrl-C and Ctrl-Z reach
+NetBSD and Ctrl-] stops nc. QEMU serves one client at a time, so the script
+holds `console.lock` and a second console refuses to start.
+
 The microvm machine has no ACPI, so NetBSD can halt but not power off. `vmctl`
 halts it with `rc.shutdown` and `halt`, waits for the console to say so, and
 kills QEMU. `shutdown(8)` takes too long: WSL stops the distribution 15
@@ -125,7 +132,8 @@ docker run --rm --device /dev/kvm -v "$PWD/test:/test:ro" wsnetbsd /bin/sh /test
 ```
 
 Windows programs, Explorer access and the default user need a real WSL
-install.
+install. The `console` script needs a terminal, so the smoke test only checks
+that the console has a login prompt.
 
 ## CI and releases
 

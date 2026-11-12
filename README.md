@@ -179,8 +179,8 @@ disk is sparse: `wsl --manage NetBSD --set-sparse true`.
 
 ### "NetBSD did not start"
 
-The message ends with the last lines of the log. The full logs are in the
-Alpine layer:
+The message shows the last lines of the log. The full logs are in the Alpine
+layer:
 
 ```
 wsl -d NetBSD -e cat /run/wsnetbsd/monitor.log
@@ -197,6 +197,26 @@ nestedVirtualization=true
 ```
 
 Then run `wsl --shutdown` and start NetBSD again.
+
+### NetBSD boots but logins fail
+
+When NetBSD's ssh server does not answer, for example after a change to
+`/etc/rc.conf` or `/etc/ssh/sshd_config`, or when the boot stops for a file
+system check, use NetBSD's serial console. It has a login prompt, and root
+has no password there either:
+
+```
+wsl -d NetBSD -u root -e /usr/libexec/wsnetbsd/console
+```
+
+Ctrl-] detaches and leaves you logged in. Only one console can be attached at
+a time. The console starts NetBSD if it is not running and keeps it running
+while attached. It does not know the window size, so for full-screen programs
+set it, as in `stty rows 40 columns 120`.
+
+Logins work again once the ssh server answers. To restart NetBSD instead, run
+`shutdown -h now` on the console and detach when it says it has halted. The
+next login starts it.
 
 ### Lost changes after `wsl --shutdown`
 

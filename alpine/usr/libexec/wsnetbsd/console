@@ -1,0 +1,69 @@
+#!/bin/sh
+# console: attaches the terminal to NetBSD's serial console, whose login
+# prompt works without ssh. Run as root in the Alpine layer. Ctrl-] detaches.
+# shellcheck source=common
+. /usr/libexec/wsnetbsd/common
+
+die() { echo "console: $*" >&2; exit 1; }
+
+[ "$(id -u)" = 0 ] || die "run as root"
+[ -t 0 ] && [ -t 1 ] || die "needs a terminal"
+
+SOCKET=$RUN/console.sock
+saved=$(stty -g)
+detached=
+trap 'stty "$saved"; session_end' EXIT
+# Ctrl-C while waiting, Ctrl-] while attached. Unlike ignoring the signal, a
+# trap leaves nc to die of it.
+trap 'detached=1' INT
+
+# The session keeps the VM up while the console is attached, and boots it if
+# it is down. Unlike a login, the console does not wait for the guest's sshd.
+session_add || exit 1
+
+# QEMU serves one client at a time. A second one would connect and see
+# nothing until the first detached.
+exec 8> "$RUN/console.lock"
+flock -n 8 || die "another console is attached"
+
+# wait_for_vm: waits until QEMU runs. Fails on Ctrl-C, or when the monitor
+# has exited, since nothing would boot the VM then.
+wait_for_vm() {
+	running && [ -S "$SOCKET" ] && return
+	echo "Waiting for NetBSD to start. Ctrl-C stops."
+	until running && [ -S "$SOCKET" ]; do
+		[ -z "$detached" ] || return 1
+		# The monitor holds this lock for as long as it runs.
+		if flock -n "$RUN/monitor.lock" true; then
+			echo "console: the monitor has exited, see $RUN/monitor.log" >&2
+			return 1
+		fi
+		sleep 0.1
+	done
+}
+
+# attach: connects the terminal to the console until Ctrl-] or until QEMU
+# exits.
+attach() {
+	echo "Connected to NetBSD's console. Ctrl-] detaches."
+	# What the console showed last, such as a login prompt.
+	tail -n 4 "$RUN/console.log"
+	# Keys reach NetBSD as typed, Ctrl-C and Ctrl-Z included. Only Ctrl-]
+	# makes a signal, which stops nc.
+	stty raw -echo -iexten isig intr '^]' quit undef susp undef
+	nc -U "$SOCKET"
+	stty "$saved"
+	echo
+}
+
+while [ -z "$detached" ]; do
+	wait_for_vm || exit 1
+	attach
+	# QEMU went away: a crash, or the monitor stopped an idle VM just as the
+	# console attached. The session makes the monitor boot NetBSD again. The
+	# wait keeps a console that cannot stay connected from spinning.
+	if [ -z "$detached" ]; then
+		echo "NetBSD's console closed."
+		sleep 1
+	fi
+done
