@@ -23,6 +23,11 @@ ssh, through a QEMU port forward on 127.0.0.1. The monitor takes the first
 free port from 22022 up, since all WSL distributions share one network
 namespace, and writes it to `/run/wsnetbsd/ssh-port`.
 
+The monitor writes `ready` when the guest's sshd answers. If it has not
+answered 60 seconds after the boot, the monitor writes
+`/run/wsnetbsd/failed`, which makes logins fail without waiting, and keeps
+asking. It removes `failed` when sshd answers or QEMU stops.
+
 The other direction uses a slirp `guestfwd` rule. A guest connection to
 `10.0.2.100:22` makes QEMU start `sshd -i` in Alpine with
 `alpine/usr/lib/wsnetbsd/sshd_config`, whose forced command is
