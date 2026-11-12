@@ -136,7 +136,8 @@ An existing NetBSD account keeps its uid. Then `wsl -d NetBSD -u NAME`.
 
 ### The Alpine layer
 
-`wsl -d NetBSD -e /bin/sh` opens a shell in Alpine instead of NetBSD.
+`wsl -d NetBSD -e /bin/sh` opens a shell in Alpine instead of NetBSD, and does
+not start NetBSD.
 
 ### Settings
 

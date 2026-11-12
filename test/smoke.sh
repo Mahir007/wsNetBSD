@@ -30,6 +30,8 @@ eventually() {
 }
 
 /usr/libexec/wsnetbsd/vmctl boot
+sleep 1
+check "waits for a session to boot" stopped "$(/usr/libexec/wsnetbsd/vmctl status)"
 
 check "runs commands in NetBSD" NetBSD "$($shell -c 'uname -s')"
 $shell -c 'exit 7'

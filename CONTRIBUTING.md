@@ -12,8 +12,9 @@
 ## How it works
 
 WSL starts `vmctl boot` from `/etc/wsl.conf`. It starts the monitor, the only
-process that starts or stops QEMU. The monitor boots NetBSD, and halts it when
-no session has been attached for `IDLE_HALT_SECONDS`.
+process that starts or stops QEMU. The monitor boots NetBSD when the first
+session appears, so `wsl -e` into Alpine leaves it off, and halts it when no
+session has been attached for `IDLE_HALT_SECONDS`.
 
 Every user's login shell in Alpine is `/usr/libexec/wsnetbsd/shell`. It
 registers a session file in `/run/wsnetbsd/sessions`, waits for

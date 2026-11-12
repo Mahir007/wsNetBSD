@@ -44,6 +44,8 @@ ssh_guest() {
 # quote STRING: prints STRING as one single-quoted shell word.
 quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
 
+running() { [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; }
+
 # session_begin: registers this process as a session, which keeps the VM up,
 # and waits until the guest accepts logins.
 session_begin() {

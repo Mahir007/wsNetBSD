@@ -9,8 +9,6 @@ set -eu
 LIB=/usr/lib/wsnetbsd
 HOST_KEY=$STATE/ssh_host_ed25519_key
 
-running() { [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; }
-
 memory_mib() {
 	total=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
 	half=$((total / 2))
@@ -250,7 +248,8 @@ cmd_monitor() {
 	chmod 1777 "$SESSIONS"
 	# Login shells watch for $FAILED so they report a dead monitor immediately.
 	trap '[ -f "$READY" ] || : > "$FAILED"' EXIT
-	start_vm
+	# The VM boots for the first session, so `wsl -e` into Alpine does not
+	# start it.
 	idle=0
 	seen=
 	while :; do
@@ -274,7 +273,9 @@ cmd_monitor() {
 			fi
 		fi
 		seen=$sessions
-		sleep 0.25
+		# The idle count assumes 0.25 s. With no VM, a shorter wait boots it
+		# sooner for a new session.
+		if running; then sleep 0.25; else sleep 0.05; fi
 	done
 }
 
