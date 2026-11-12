@@ -12,8 +12,9 @@
 ## How it works
 
 WSL starts `vmctl boot` from `/etc/wsl.conf`. It starts the monitor, the only
-process that starts or stops QEMU. The monitor boots NetBSD, and halts it when
-no session has been attached for `IDLE_HALT_SECONDS`.
+process that starts or stops QEMU. The monitor boots NetBSD when the first
+session appears, so `wsl -e` into Alpine leaves it off, and halts it when no
+session has been attached for `IDLE_HALT_SECONDS`.
 
 Every user's login shell in Alpine is `/usr/libexec/wsnetbsd/shell`. It
 registers a session file in `/run/wsnetbsd/sessions`, waits for
@@ -21,6 +22,11 @@ registers a session file in `/run/wsnetbsd/sessions`, waits for
 ssh, through a QEMU port forward on 127.0.0.1. The monitor takes the first
 free port from 22022 up, since all WSL distributions share one network
 namespace, and writes it to `/run/wsnetbsd/ssh-port`.
+
+The monitor writes `ready` when the guest's sshd answers. If it has not
+answered 60 seconds after the boot, the monitor writes
+`/run/wsnetbsd/failed`, which makes logins fail without waiting, and keeps
+asking. It removes `failed` when sshd answers or QEMU stops.
 
 The other direction uses a slirp `guestfwd` rule. A guest connection to
 `10.0.2.100:22` makes QEMU start `sshd -i` in Alpine with
@@ -61,6 +67,13 @@ leaks the blocks until a full fsck, which the clean journal never triggers.
 `guest/etc/rc.d/wsnetbsd` keeps `/var/db/wsnetbsd.running` from boot until a
 stop that finds free space settled, and `rc.conf` forces a full fsck at boot
 while it exists.
+
+QEMU's serial console is the socket `/run/wsnetbsd/console.sock`, which it
+also logs to `console.log`. The `console` script registers a session but does
+not wait for `ready`, and connects the terminal to the socket with `nc -U`.
+It makes Ctrl-] the terminal's only signal key, so Ctrl-C and Ctrl-Z reach
+NetBSD and Ctrl-] stops nc. QEMU serves one client at a time, so the script
+holds `console.lock` and a second console refuses to start.
 
 The microvm machine has no ACPI, so NetBSD can halt but not power off. `vmctl`
 halts it with `rc.shutdown` and `halt`, waits for the console to say so, and
@@ -119,7 +132,8 @@ docker run --rm --device /dev/kvm -v "$PWD/test:/test:ro" wsnetbsd /bin/sh /test
 ```
 
 Windows programs, Explorer access and the default user need a real WSL
-install.
+install. The `console` script needs a terminal, so the smoke test only checks
+that the console has a login prompt.
 
 ## CI and releases
 

@@ -30,6 +30,8 @@ eventually() {
 }
 
 /usr/libexec/wsnetbsd/vmctl boot
+sleep 1
+check "waits for a session to boot" stopped "$(/usr/libexec/wsnetbsd/vmctl status)"
 
 check "runs commands in NetBSD" NetBSD "$($shell -c 'uname -s')"
 $shell -c 'exit 7'
@@ -40,6 +42,9 @@ check "starts in the same directory" /mnt "$(cd /mnt && $shell -c pwd)"
 touch /mnt/smoke
 check "shares /mnt" yes "$($shell -c 'test -f /mnt/smoke && echo yes')"
 check "uses the Alpine host name" "$(hostname)" "$($shell -c hostname)"
+# The console script needs a terminal, so this checks only the guest's side.
+check "has a login prompt on the console" yes \
+	"$( (printf '\r'; sleep 1) | timeout 3 nc -U /run/wsnetbsd/console.sock | grep -q 'login:' && echo yes)"
 
 /usr/libexec/wsnetbsd/adduser alice >/dev/null
 check "maps users with the same uid" "alice 1000" "$(su alice -c 'id -un; id -u' | xargs)"

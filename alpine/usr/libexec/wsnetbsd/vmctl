@@ -9,8 +9,6 @@ set -eu
 LIB=/usr/lib/wsnetbsd
 HOST_KEY=$STATE/ssh_host_ed25519_key
 
-running() { [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; }
-
 memory_mib() {
 	total=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
 	half=$((total / 2))
@@ -127,15 +125,17 @@ boot_vm() {
 	done
 }
 
-start_vm() {
-	running || boot_vm
-	n=0
-	until ssh_guest root -n netbsd true 2>/dev/null; do
-		n=$((n + 1))
-		[ "$n" -lt 600 ] || { echo "wsnetbsd: VM did not come up, see $RUN/console.log" >&2; return 1; }
-		sleep 0.1
-	done
-	: > "$READY"
+# check_ready: marks the guest ready once its sshd answers. After 60 s without
+# an answer, logins fail at once instead of waiting. The monitor keeps asking,
+# so they work again when NetBSD is fixed on its console.
+check_ready() {
+	if ssh_guest root -n netbsd true 2>/dev/null; then
+		rm -f "$FAILED"
+		: > "$READY"
+	elif [ ! -f "$FAILED" ] && [ $(($(date +%s) - booted)) -ge 60 ]; then
+		echo "wsnetbsd: NetBSD's sshd does not answer, see $RUN/console.log" >&2
+		: > "$FAILED"
+	fi
 }
 
 stop_vm() {
@@ -248,20 +248,36 @@ cmd_monitor() {
 	flock -n 9 || { echo "wsnetbsd: a monitor is already running" >&2; exit 0; }
 	mkdir -p "$SESSIONS"
 	chmod 1777 "$SESSIONS"
-	# Login shells watch for $FAILED so they report a dead monitor immediately.
+	# Login shells fail at once while $FAILED exists: the monitor has exited,
+	# or the guest's sshd has not answered for 60 s.
 	trap '[ -f "$READY" ] || : > "$FAILED"' EXIT
-	start_vm
+	rm -f "$FAILED"
+	booted=$(date +%s)
 	idle=0
 	seen=
 	while :; do
 		# QEMU can die without stop_vm: a crash, or a kill from outside.
-		running || rm -f "$READY"
+		running || rm -f "$READY" "$FAILED"
 		prune_sessions
 		sessions=$(ls -A "$SESSIONS")
+		# The idle count assumes 0.25 s. The shorter waits notice a new
+		# session, or the guest's sshd, sooner.
+		nap=0.25
 		if [ -n "$sessions" ]; then
 			idle=0
-			running || start_vm
-			if [ "$sessions" != "$seen" ]; then
+			# The VM boots for the first session, so `wsl -e` into Alpine does
+			# not start it.
+			if ! running; then
+				boot_vm
+				booted=$(date +%s)
+			fi
+			[ -f "$READY" ] || check_ready
+			if [ ! -f "$READY" ]; then
+				# Leaves $seen empty, so the sessions count as new once the
+				# guest is ready and their homes can be mounted.
+				sessions=
+				if [ -f "$FAILED" ]; then nap=1; else nap=0.05; fi
+			elif [ "$sessions" != "$seen" ]; then
 				refresh_windows_programs
 				mount_homes
 			fi
@@ -272,9 +288,11 @@ cmd_monitor() {
 				idle=0
 				apply_default_user
 			fi
+		else
+			nap=0.05
 		fi
 		seen=$sessions
-		sleep 0.25
+		sleep "$nap"
 	done
 }
 

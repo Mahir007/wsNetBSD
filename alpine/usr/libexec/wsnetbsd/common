@@ -44,9 +44,11 @@ ssh_guest() {
 # quote STRING: prints STRING as one single-quoted shell word.
 quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
 
-# session_begin: registers this process as a session, which keeps the VM up,
-# and waits until the guest accepts logins.
-session_begin() {
+running() { [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; }
+
+# session_add: registers this process as a session. The monitor boots the VM
+# when the first session appears and keeps it up while any remain.
+session_add() {
 	_n=0
 	until [ -d "$SESSIONS" ]; do
 		_n=$((_n + 1))
@@ -56,6 +58,12 @@ session_begin() {
 	SESSION=$SESSIONS/$$
 	# The monitor reads the Windows PATH from here to find Windows programs.
 	printf '%s\n' "$(windows_path)" > "$SESSION"
+}
+
+# session_begin: registers this process as a session and waits until the
+# guest accepts logins.
+session_begin() {
+	session_add || return 1
 	_n=0
 	until [ -f "$READY" ]; do
 		_n=$((_n + 1))
@@ -64,6 +72,7 @@ session_begin() {
 			echo "wsnetbsd: NetBSD did not start." >&2
 			tail -n 3 "$RUN/monitor.log" 2>/dev/null | sed 's/^/  /' >&2
 			echo "See $RUN/monitor.log and $RUN/console.log in the Alpine layer." >&2
+			echo "NetBSD's console: wsl -d ${WSL_DISTRO_NAME:-NetBSD} -u root -e /usr/libexec/wsnetbsd/console" >&2
 			return 1
 		fi
 		sleep 0.05
